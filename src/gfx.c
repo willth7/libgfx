@@ -40,6 +40,7 @@ VkCommandPool vk_cmdp;
 VkCommandBuffer vk_cmd_draw;
 VkSemaphore vk_smph_img;
 VkSemaphore vk_smph_drw;
+VkFence vk_fnc;
 
 VkShaderModule vk_vrtx_shdr;
 VkShaderModule vk_frag_shdr;
@@ -210,6 +211,11 @@ void init_vk_smph() {
 		smphinfo.flags = 0;
 	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_img);
 	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_drw);
+	VkFenceCreateInfo fncinfo;
+		fncinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fncinfo.pNext = 0;
+		fncinfo.flags = 0;
+	vkCreateFence(vk_devc, &fncinfo, 0, &vk_fnc);
 }
 
 void init_vk_swap() {
@@ -728,7 +734,7 @@ void gfx_draw(uint64_t n) {
 		sbmtinfo.pCommandBuffers = &vk_cmd_draw;
 		sbmtinfo.signalSemaphoreCount = 1;
 		sbmtinfo.pSignalSemaphores = &vk_smph_drw;
-	vkQueueSubmit(vk_que, 1, &sbmtinfo, 0);
+	vkQueueSubmit(vk_que, 1, &sbmtinfo, vk_fnc);
 	
 	VkPresentInfoKHR preinfo;
 		preinfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -741,8 +747,8 @@ void gfx_draw(uint64_t n) {
 		preinfo.pResults = 0;
 	vkQueuePresentKHR(vk_que, &preinfo);
 	
-	vkQueueWaitIdle(vk_que);
-	vkDeviceWaitIdle(vk_devc);
+	vkWaitForFences(vk_devc, 1, &vk_fnc, 1, UINT64_MAX);
+	vkResetFences(vk_devc, 1, &vk_fnc);
 }
 
 void gfx_term() {
@@ -784,6 +790,7 @@ void gfx_term() {
 	
 	vkDestroySemaphore(vk_devc, vk_smph_img, 0);
 	vkDestroySemaphore(vk_devc, vk_smph_drw, 0);
+	vkDestroyFence(vk_devc, vk_fnc, 0);
 	
 	vkDestroyDevice(vk_devc, 0);
 	vkDestroySurfaceKHR(vk_inst, vk_srfc, 0);
