@@ -15,10 +15,10 @@
 //TODO
 //	optimize per-frame functions
 //	optimize per-resize functions
-//	descriptors
-//	uniform buffer
 //	staging buffer?
 //	textures
+//	flexibility in drawing and binding buffers
+//	have functions not segfault if objects aren't initialized
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -36,7 +36,7 @@ VkSurfaceKHR vk_srfc;
 VkDevice vk_devc;
 VkQueue vk_que;
 
-VkCommandPool vk_cmdp;
+VkCommandPool vk_cmd_pool;
 VkCommandBuffer vk_cmd_draw;
 VkSemaphore vk_smph_img;
 VkSemaphore vk_smph_drw;
@@ -53,12 +53,12 @@ VkFramebuffer* vk_frme;
 uint32_t vk_frme_i;
 
 VkImage* vk_swap_img;
-VkImageView* vk_swap_imgv;
+VkImageView* vk_swap_img_v;
 uint32_t vk_swap_img_cnt;
 
 VkImage vk_dpth_img;
 VkDeviceMemory vk_dpth_mem;
-VkImageView vk_dpth_imgv;
+VkImageView vk_dpth_img_v;
 
 VkBuffer vk_vrtx_bfr;
 VkDeviceMemory vk_vrtx_mem;
@@ -78,10 +78,21 @@ VkMemoryRequirements vk_indx_req;
 void* vk_indx;
 uint64_t vk_indx_sz;
 
-VkPushConstantRange* vk_push_rng;
+VkBuffer vk_unif_bfr;
+VkDeviceMemory vk_unif_mem;
+VkMemoryRequirements vk_unif_req;
+void* vk_unif;
+uint64_t vk_unif_sz;
+
+VkPushConstantRange vk_push_rng;
 uint32_t vk_push_rng_n;
 void* vk_push;
 uint64_t vk_push_sz;
+
+VkDescriptorPool vk_desc_pool;
+VkDescriptorSet vk_desc_set;
+VkDescriptorSetLayout vk_desc_layt;
+uint32_t vk_desc_layt_n;
 
 VkClearValue vk_clr[2];
 
@@ -187,18 +198,18 @@ void init_vk_rndr() {
 	vkCreateRenderPass(vk_devc, &rndrinfo, 0, &vk_rndr);
 }
 
-void init_vk_cmdp() {
-	VkCommandPoolCreateInfo cmdpinfo;
-		cmdpinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		cmdpinfo.pNext = 0;
-		cmdpinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		cmdpinfo.queueFamilyIndex = 0;
-	vkCreateCommandPool(vk_devc, &cmdpinfo, 0, &vk_cmdp);
+void init_vk_cmd_pool() {
+	VkCommandPoolCreateInfo cmd_poolinfo;
+		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		cmd_poolinfo.pNext = 0;
+		cmd_poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		cmd_poolinfo.queueFamilyIndex = 0;
+	vkCreateCommandPool(vk_devc, &cmd_poolinfo, 0, &vk_cmd_pool);
 	
 	VkCommandBufferAllocateInfo cmdinfo;
 		cmdinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdinfo.pNext = 0;
-		cmdinfo.commandPool = vk_cmdp;
+		cmdinfo.commandPool = vk_cmd_pool;
 		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		cmdinfo.commandBufferCount = 1;
 	vkAllocateCommandBuffers(vk_devc, &cmdinfo, &vk_cmd_draw);
@@ -211,6 +222,7 @@ void init_vk_smph() {
 		smphinfo.flags = 0;
 	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_img);
 	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_drw);
+	
 	VkFenceCreateInfo fncinfo;
 		fncinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		fncinfo.pNext = 0;
@@ -248,7 +260,7 @@ void init_vk_swap() {
 	vkGetSwapchainImagesKHR(vk_devc, vk_swap, &vk_swap_img_cnt, 0);
 	vk_swap_img = malloc(sizeof(VkImage) * vk_swap_img_cnt);
 	vkGetSwapchainImagesKHR(vk_devc, vk_swap, &vk_swap_img_cnt, vk_swap_img);
-	vk_swap_imgv = malloc(sizeof(VkImageView) * vk_swap_img_cnt);
+	vk_swap_img_v = malloc(sizeof(VkImageView) * vk_swap_img_cnt);
 	VkImageViewCreateInfo imgvinfo;
 		imgvinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		imgvinfo.pNext = 0;
@@ -266,7 +278,7 @@ void init_vk_swap() {
 		imgvinfo.subresourceRange.layerCount = 1;
 	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
 		imgvinfo.image = vk_swap_img[i];
-		vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_swap_imgv[i]);
+		vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_swap_img_v[i]);
 	}
 }
 
@@ -312,7 +324,7 @@ void init_vk_dpth() {
 		imgvinfo.subresourceRange.levelCount = 1;
 		imgvinfo.subresourceRange.baseArrayLayer = 0;
 		imgvinfo.subresourceRange.layerCount = 1;
-	vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_dpth_imgv);
+	vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_dpth_img_v);
 }
 
 void init_vk_pipe() {
@@ -435,10 +447,10 @@ void init_vk_pipe() {
 		pipelaytinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pipelaytinfo.pNext = 0;
 		pipelaytinfo.flags = 0;
-		pipelaytinfo.setLayoutCount = 0;
-		pipelaytinfo.pSetLayouts = 0;
+		pipelaytinfo.setLayoutCount = vk_desc_layt_n;
+		pipelaytinfo.pSetLayouts = &vk_desc_layt;
 		pipelaytinfo.pushConstantRangeCount = vk_push_rng_n;
-		pipelaytinfo.pPushConstantRanges = vk_push_rng;
+		pipelaytinfo.pPushConstantRanges = &vk_push_rng;
 	vkCreatePipelineLayout(vk_devc, &pipelaytinfo, 0, &vk_pipe_layt);
 	
 	VkGraphicsPipelineCreateInfo pipeinfo;
@@ -466,7 +478,7 @@ void init_vk_pipe() {
 
 void init_vk_frme() {
 	VkImageView atch[2];
-	atch[1] = vk_dpth_imgv;
+	atch[1] = vk_dpth_img_v;
 	VkFramebufferCreateInfo fbfrinfo;
 		fbfrinfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		fbfrinfo.pNext = 0;
@@ -479,7 +491,7 @@ void init_vk_frme() {
 		fbfrinfo.layers = 1;
 		vk_frme = malloc(sizeof(VkFramebuffer) * vk_swap_img_cnt);
 	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		atch[0] = vk_swap_imgv[i];
+		atch[0] = vk_swap_img_v[i];
 		vkCreateFramebuffer(vk_devc, &fbfrinfo, 0, &vk_frme[i]);
 	}
 }
@@ -519,6 +531,7 @@ void init_vk_cmd_draw(uint64_t n) {
 	VkDeviceSize offset = {0};
 	vkCmdBindVertexBuffers(vk_cmd_draw, 0, 1, &vk_vrtx_bfr, &offset);
 	vkCmdBindIndexBuffer(vk_cmd_draw, vk_indx_bfr, 0, VK_INDEX_TYPE_UINT32);
+	if (vk_desc_set != 0) vkCmdBindDescriptorSets(vk_cmd_draw, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipe_layt, 0, 1, &vk_desc_set, 0, 0);
 	vkCmdPushConstants(vk_cmd_draw, vk_pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, vk_push_sz, vk_push);
 	vkCmdDrawIndexed(vk_cmd_draw, n, 1, 0, 0, 0);
 
@@ -542,13 +555,21 @@ void rfsh_vk_indx() {
 	vkBindBufferMemory(vk_devc, vk_indx_bfr, vk_indx_mem, 0);
 }
 
+void rfsh_vk_unif() {
+	void* data;
+	vkMapMemory(vk_devc, vk_unif_mem, 0, vk_unif_req.size, 0, &data);
+	memcpy(data, vk_unif, vk_unif_sz);
+	vkUnmapMemory(vk_devc, vk_unif_mem);
+	vkBindBufferMemory(vk_devc, vk_unif_bfr, vk_unif_mem, 0);
+}
+
 void gfx_init(GLFWwindow* win) {
 	glfw_win = win;
 	glfwGetWindowSize(glfw_win, &glfw_win_w, &glfw_win_h);
 	init_vk_inst();
 	init_vk_devc();
 	init_vk_rndr();
-	init_vk_cmdp();
+	init_vk_cmd_pool();
 	init_vk_smph();
 }
 
@@ -568,15 +589,15 @@ void gfx_resz(void* v, uint32_t w, uint32_t h) {
 	vkDestroyPipeline(vk_devc, vk_pipe, 0);
 	vkDestroyPipelineLayout(vk_devc, vk_pipe_layt, 0);
 	
-	vkDestroyImageView(vk_devc, vk_dpth_imgv, 0);
+	vkDestroyImageView(vk_devc, vk_dpth_img_v, 0);
 	vkDestroyImage(vk_devc, vk_dpth_img, 0);
 	vkFreeMemory(vk_devc, vk_dpth_mem, 0);
 	
 	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyImageView(vk_devc, vk_swap_imgv[i], 0);
+		vkDestroyImageView(vk_devc, vk_swap_img_v[i], 0);
 	}
 	free(vk_swap_img);
-	free(vk_swap_imgv);
+	free(vk_swap_img_v);
 	
 	glfw_win_w = w;
 	glfw_win_h = h;
@@ -663,17 +684,92 @@ void gfx_init_indx(void* indx, uint64_t sz) {
 	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_indx_mem);
 }
 
+void gfx_init_unif(void* unif, uint64_t sz) {
+	vk_unif = unif;
+	vk_unif_sz = sz;
+
+	VkBufferCreateInfo bfrinfo;
+		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bfrinfo.pNext = 0;
+		bfrinfo.flags = 0;
+		bfrinfo.size = vk_unif_sz;
+		bfrinfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		bfrinfo.sharingMode = 0;
+		bfrinfo.queueFamilyIndexCount = 0;
+		bfrinfo.pQueueFamilyIndices = 0;
+	vkCreateBuffer(vk_devc, &bfrinfo, 0, &vk_unif_bfr);
+	
+	vkGetBufferMemoryRequirements(vk_devc, vk_unif_bfr, &vk_unif_req);
+	VkMemoryAllocateInfo meminfo;
+		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		meminfo.pNext = 0;
+		meminfo.allocationSize = vk_unif_req.size;
+		meminfo.memoryTypeIndex = 0;
+	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_unif_mem);
+}
+
 void gfx_init_push(void* push, uint64_t sz, uint32_t n) {
 	vk_push = push;
 	vk_push_sz = sz;
-	vk_push_rng = malloc(sizeof(VkPushConstantRange) * n);
-	vk_push_rng_n = n;
+	vk_push_rng.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	vk_push_rng.offset = 0;
+	vk_push_rng.size = sz;
+	vk_push_rng_n = 1;
 }
 
-void gfx_set_push(uint32_t i, uint32_t off, uint32_t sz) {
-	vk_push_rng[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	vk_push_rng[i].offset = off;
-	vk_push_rng[i].size = sz;
+void gfx_init_desc() {
+	VkDescriptorPoolSize descpoolsz;
+		descpoolsz.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descpoolsz.descriptorCount = 2;
+	VkDescriptorPoolCreateInfo descpoolinfo;
+		descpoolinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		descpoolinfo.pNext = 0;
+		descpoolinfo.flags = 0;
+		descpoolinfo.maxSets = 2;
+		descpoolinfo.poolSizeCount = 1;
+		descpoolinfo.pPoolSizes = &descpoolsz;
+	vkCreateDescriptorPool(vk_devc, &descpoolinfo, 0, &vk_desc_pool);
+	
+	VkDescriptorSetLayoutBinding desclaytbind;
+		desclaytbind.binding = 0;
+		desclaytbind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		desclaytbind.descriptorCount = 1;
+		desclaytbind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		desclaytbind.pImmutableSamplers = 0;
+	VkDescriptorSetLayoutCreateInfo desclaytinfo;
+		desclaytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		desclaytinfo.pNext = 0;
+		desclaytinfo.flags = 0;
+		desclaytinfo.bindingCount = 1;
+		desclaytinfo.pBindings = &desclaytbind;
+	vkCreateDescriptorSetLayout(vk_devc, &desclaytinfo, 0, &vk_desc_layt);
+	vk_desc_layt_n = 1;
+	
+	VkDescriptorSetAllocateInfo descalcinfo;
+		descalcinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		descalcinfo.pNext = 0;
+		descalcinfo.descriptorPool = vk_desc_pool;
+		descalcinfo.descriptorSetCount = 1;
+		descalcinfo.pSetLayouts = &vk_desc_layt;
+	vkAllocateDescriptorSets(vk_devc, &descalcinfo, &vk_desc_set);
+	
+	VkDescriptorBufferInfo descbfrinfo;
+		descbfrinfo.buffer = vk_unif_bfr;
+		descbfrinfo.offset = 0;
+		descbfrinfo.range = vk_unif_sz;
+	rfsh_vk_unif();
+	VkWriteDescriptorSet descwrit;
+		descwrit.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descwrit.pNext = 0;
+		descwrit.dstSet = vk_desc_set;
+		descwrit.dstBinding = 0;
+		descwrit.dstArrayElement = 0;
+		descwrit.descriptorCount = 1;
+		descwrit.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descwrit.pImageInfo = 0;
+		descwrit.pBufferInfo = &descbfrinfo;
+		descwrit.pTexelBufferView = 0;
+	vkUpdateDescriptorSets(vk_devc, 1, &descwrit, 0, 0);
 }
 
 void gfx_set_shdr(int8_t* pthv, int8_t* pthf) {
@@ -718,6 +814,7 @@ void gfx_set_clr(uint8_t r, uint8_t g, uint8_t b) {
 void gfx_draw(uint64_t n) {
 	rfsh_vk_vrtx();
 	rfsh_vk_indx();
+	if (vk_unif != 0) rfsh_vk_unif();
 	
 	vkAcquireNextImageKHR(vk_devc, vk_swap, UINT64_MAX, vk_smph_img, 0, &vk_frme_i);
 	
@@ -761,15 +858,15 @@ void gfx_term() {
 	vkDestroyPipelineLayout(vk_devc, vk_pipe_layt, 0);
 	vkDestroyRenderPass(vk_devc, vk_rndr, 0);
 	
-	vkDestroyImageView(vk_devc, vk_dpth_imgv, 0);
+	vkDestroyImageView(vk_devc, vk_dpth_img_v, 0);
 	vkDestroyImage(vk_devc, vk_dpth_img, 0);
 	vkFreeMemory(vk_devc, vk_dpth_mem, 0);
 	
 	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyImageView(vk_devc, vk_swap_imgv[i], 0);
+		vkDestroyImageView(vk_devc, vk_swap_img_v[i], 0);
 	}
 	free(vk_swap_img);
-	free(vk_swap_imgv);
+	free(vk_swap_img_v);
 	vkDestroySwapchainKHR(vk_devc, vk_swap, 0);
 	
 	vkDestroyBuffer(vk_devc, vk_vrtx_bfr, 0);
@@ -780,13 +877,18 @@ void gfx_term() {
 	vkDestroyBuffer(vk_devc, vk_indx_bfr, 0);
 	vkFreeMemory(vk_devc, vk_indx_mem, 0);
 	
-	if (vk_push_rng != 0) free(vk_push_rng);
+	vkDestroyBuffer(vk_devc, vk_unif_bfr, 0);
+	vkFreeMemory(vk_devc, vk_unif_mem, 0);
 	
 	vkDestroyShaderModule(vk_devc, vk_vrtx_shdr, 0);
 	vkDestroyShaderModule(vk_devc, vk_frag_shdr, 0);
 	
-	vkFreeCommandBuffers(vk_devc, vk_cmdp, 1, &vk_cmd_draw);
-	vkDestroyCommandPool(vk_devc, vk_cmdp, 0);
+	vkFreeDescriptorSets(vk_devc, vk_desc_pool, 1, &vk_desc_set);
+	vkDestroyDescriptorSetLayout(vk_devc, vk_desc_layt, 0);
+	vkDestroyDescriptorPool(vk_devc, vk_desc_pool, 0);
+	
+	vkFreeCommandBuffers(vk_devc, vk_cmd_pool, 1, &vk_cmd_draw);
+	vkDestroyCommandPool(vk_devc, vk_cmd_pool, 0);
 	
 	vkDestroySemaphore(vk_devc, vk_smph_img, 0);
 	vkDestroySemaphore(vk_devc, vk_smph_drw, 0);
