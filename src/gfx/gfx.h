@@ -37,9 +37,13 @@ void gfx_init_indx(void*, uint64_t);
 
 void gfx_init_unif(void*, uint64_t);
 
-void gfx_init_push(void*, uint64_t, uint32_t);
+void gfx_init_txtr(uint8_t*, uint32_t, uint32_t);
 
-void gfx_init_desc();
+void gfx_init_push(void*, uint64_t);
+
+void gfx_init_desc(uint32_t);
+
+void gfx_set_desc();
 
 void gfx_set_shdr(int8_t*, int8_t*);
 
