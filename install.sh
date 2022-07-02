@@ -1,4 +1,5 @@
 #!/bin/bash
 
 cp libgfx.so /usr/lib/
-cp src/gfx/gfx.h /usr/include/
+mkdir /usr/include/gfx
+cp src/gfx/gfx.h /usr/include/gfx

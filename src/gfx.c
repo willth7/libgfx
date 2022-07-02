@@ -13,12 +13,9 @@
 //   limitations under the License.
 
 //TODO
-//	optimize per-frame functions
-//	optimize per-resize functions
-//	staging buffer?
-//	multiple textures
-//	multiple buffers?
-//	have functions not segfault if objects aren't initialized
+//	multiple descriptors
+//	multiple buffers
+//	no global variables
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -96,14 +93,14 @@ VkMemoryRequirements vk_txtr_img_req;
 VkSampler vk_smpl;
 
 VkPushConstantRange vk_push_rng;
-uint32_t vk_push_rng_n;
 void* vk_push;
 uint64_t vk_push_sz;
 
 VkDescriptorPool vk_desc_pool;
 VkDescriptorPoolSize* vk_desc_pool_sz;
-VkDescriptorSet* vk_desc_set;
-VkDescriptorSetLayout* vk_desc_layt;
+VkDescriptorSet vk_desc_set;
+VkDescriptorSetLayoutBinding* vk_desc_layt_bind;
+VkDescriptorSetLayout vk_desc_layt;
 VkWriteDescriptorSet* vk_desc_writ;
 uint32_t vk_desc_n;
 
@@ -456,10 +453,18 @@ void init_vk_pipe() {
 		pipelaytinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pipelaytinfo.pNext = 0;
 		pipelaytinfo.flags = 0;
-		pipelaytinfo.setLayoutCount = vk_desc_n;
-		pipelaytinfo.pSetLayouts = vk_desc_layt;
-		pipelaytinfo.pushConstantRangeCount = vk_push_rng_n;
+		pipelaytinfo.setLayoutCount = 0;
+		pipelaytinfo.pSetLayouts = 0;
+	if (vk_desc_n > 0) {
+		pipelaytinfo.setLayoutCount = 1;
+		pipelaytinfo.pSetLayouts = &vk_desc_layt;
+	}
+		pipelaytinfo.pushConstantRangeCount = 0;
+		pipelaytinfo.pPushConstantRanges = 0;
+	if (vk_push != 0) {
+		pipelaytinfo.pushConstantRangeCount = 1;
 		pipelaytinfo.pPushConstantRanges = &vk_push_rng;
+	}
 	vkCreatePipelineLayout(vk_devc, &pipelaytinfo, 0, &vk_pipe_layt);
 	
 	VkGraphicsPipelineCreateInfo pipeinfo;
@@ -550,8 +555,8 @@ void init_vk_cmd_draw(uint64_t n) {
 	VkDeviceSize offset = {0};
 	vkCmdBindVertexBuffers(vk_cmd_draw, 0, 1, &vk_vrtx_bfr, &offset);
 	vkCmdBindIndexBuffer(vk_cmd_draw, vk_indx_bfr, 0, VK_INDEX_TYPE_UINT32);
-	vkCmdBindDescriptorSets(vk_cmd_draw, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipe_layt, 0, vk_desc_n, vk_desc_set, 0, 0);
-	vkCmdPushConstants(vk_cmd_draw, vk_pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, vk_push_sz, vk_push);
+	if (vk_desc_n > 0) vkCmdBindDescriptorSets(vk_cmd_draw, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipe_layt, 0, 1, &vk_desc_set, 0, 0);
+	if (vk_push != 0) vkCmdPushConstants(vk_cmd_draw, vk_pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, vk_push_sz, vk_push);
 	vkCmdDrawIndexed(vk_cmd_draw, n, 1, 0, 0, 0);
 	
 	vkCmdEndRenderPass(vk_cmd_draw);
@@ -565,7 +570,7 @@ void init_vk_cmd_draw(uint64_t n) {
 	vkEndCommandBuffer(vk_cmd_draw);
 }
 
-void rfsh_vk_vrtx() {
+void gfx_rfsh_vrtx() {
 	void* data;
 	vkMapMemory(vk_devc, vk_vrtx_mem, 0, vk_vrtx_req.size, 0, &data);
 	memcpy(data, vk_vrtx, vk_vrtx_sz);
@@ -573,7 +578,7 @@ void rfsh_vk_vrtx() {
 	vkBindBufferMemory(vk_devc, vk_vrtx_bfr, vk_vrtx_mem, 0);
 }
 
-void rfsh_vk_indx() {
+void gfx_rfsh_indx() {
 	void* data;
 	vkMapMemory(vk_devc, vk_indx_mem, 0, vk_indx_req.size, 0, &data);
 	memcpy(data, vk_indx, vk_indx_sz);
@@ -581,7 +586,7 @@ void rfsh_vk_indx() {
 	vkBindBufferMemory(vk_devc, vk_indx_bfr, vk_indx_mem, 0);
 }
 
-void rfsh_vk_unif() {
+void gfx_rfsh_unif() {
 	void* data;
 	vkMapMemory(vk_devc, vk_unif_mem, 0, vk_unif_req.size, 0, &data);
 	memcpy(data, vk_unif, vk_unif_sz);
@@ -716,7 +721,7 @@ void gfx_init_indx(void* indx, uint64_t sz) {
 	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_indx_mem);
 }
 
-void gfx_init_unif(void* unif, uint64_t sz) {
+void gfx_init_unif(uint32_t b, void* unif, uint64_t sz) {
 	vk_unif = unif;
 	vk_unif_sz = sz;
 
@@ -739,41 +744,31 @@ void gfx_init_unif(void* unif, uint64_t sz) {
 		meminfo.memoryTypeIndex = 0;
 	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_unif_mem);
 	
-	vk_desc_pool_sz[vk_desc_n].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	vk_desc_pool_sz[vk_desc_n].descriptorCount = 1;
+	vk_desc_pool_sz[b].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	vk_desc_pool_sz[b].descriptorCount = 1;
 	
-	VkDescriptorSetLayoutBinding desclaytbind;
-		desclaytbind.binding = 0;
-		desclaytbind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		desclaytbind.descriptorCount = 1;
-		desclaytbind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-		desclaytbind.pImmutableSamplers = 0;
-	VkDescriptorSetLayoutCreateInfo desclaytinfo;
-		desclaytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		desclaytinfo.pNext = 0;
-		desclaytinfo.flags = 0;
-		desclaytinfo.bindingCount = 1;
-		desclaytinfo.pBindings = &desclaytbind;
-	vkCreateDescriptorSetLayout(vk_devc, &desclaytinfo, 0, &vk_desc_layt[vk_desc_n]);
+	vk_desc_layt_bind[b].binding = b;
+	vk_desc_layt_bind[b].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	vk_desc_layt_bind[b].descriptorCount = 1;
+	vk_desc_layt_bind[b].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	vk_desc_layt_bind[b].pImmutableSamplers = 0;
 	
 	vk_desc_bfr.buffer = vk_unif_bfr;
 	vk_desc_bfr.offset = 0;
 	vk_desc_bfr.range = vk_unif_sz;
-	rfsh_vk_unif();
-	vk_desc_writ[vk_desc_n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	vk_desc_writ[vk_desc_n].pNext = 0;
-	vk_desc_writ[vk_desc_n].dstBinding = 0;
-	vk_desc_writ[vk_desc_n].dstArrayElement = 0;
-	vk_desc_writ[vk_desc_n].descriptorCount = 1;
-	vk_desc_writ[vk_desc_n].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	vk_desc_writ[vk_desc_n].pImageInfo = 0;
-	vk_desc_writ[vk_desc_n].pBufferInfo = &vk_desc_bfr;
-	vk_desc_writ[vk_desc_n].pTexelBufferView = 0;
-	
-	vk_desc_n++;
+	gfx_rfsh_unif();
+	vk_desc_writ[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	vk_desc_writ[b].pNext = 0;
+	vk_desc_writ[b].dstBinding = b;
+	vk_desc_writ[b].dstArrayElement = 0;
+	vk_desc_writ[b].descriptorCount = 1;
+	vk_desc_writ[b].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	vk_desc_writ[b].pImageInfo = 0;
+	vk_desc_writ[b].pBufferInfo = &vk_desc_bfr;
+	vk_desc_writ[b].pTexelBufferView = 0;
 }
 
-void gfx_init_txtr(uint8_t* pix, uint32_t w, uint32_t h) {
+void gfx_init_txtr(uint32_t b, uint8_t* pix, uint32_t w, uint32_t h) {
 	VkBufferCreateInfo bfrinfo;
 		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		bfrinfo.pNext = 0;
@@ -917,37 +912,27 @@ void gfx_init_txtr(uint8_t* pix, uint32_t w, uint32_t h) {
 		smplinfo.unnormalizedCoordinates = 0;
 	vkCreateSampler(vk_devc, &smplinfo, 0, &vk_smpl);
 	
-	vk_desc_pool_sz[vk_desc_n].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	vk_desc_pool_sz[vk_desc_n].descriptorCount = 1;
+	vk_desc_pool_sz[b].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	vk_desc_pool_sz[b].descriptorCount = 1;
 	
-	VkDescriptorSetLayoutBinding desclaytbind;
-		desclaytbind.binding = 0;
-		desclaytbind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		desclaytbind.descriptorCount = 1;
-		desclaytbind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		desclaytbind.pImmutableSamplers = 0;
-	VkDescriptorSetLayoutCreateInfo desclaytinfo;
-		desclaytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		desclaytinfo.pNext = 0;
-		desclaytinfo.flags = 0;
-		desclaytinfo.bindingCount = 1;
-		desclaytinfo.pBindings = &desclaytbind;
-	vkCreateDescriptorSetLayout(vk_devc, &desclaytinfo, 0, &vk_desc_layt[vk_desc_n]);
+	vk_desc_layt_bind[b].binding = b;
+	vk_desc_layt_bind[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	vk_desc_layt_bind[b].descriptorCount = 1;
+	vk_desc_layt_bind[b].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	vk_desc_layt_bind[b].pImmutableSamplers = 0;
 	
 	vk_desc_img.sampler = vk_smpl;
 	vk_desc_img.imageView = vk_txtr_img_v;
 	vk_desc_img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	vk_desc_writ[vk_desc_n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	vk_desc_writ[vk_desc_n].pNext = 0;
-	vk_desc_writ[vk_desc_n].dstBinding = 0;
-	vk_desc_writ[vk_desc_n].dstArrayElement = 0;
-	vk_desc_writ[vk_desc_n].descriptorCount = 1;
-	vk_desc_writ[vk_desc_n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	vk_desc_writ[vk_desc_n].pImageInfo = &vk_desc_img;
-	vk_desc_writ[vk_desc_n].pBufferInfo = 0;
-	vk_desc_writ[vk_desc_n].pTexelBufferView = 0;
-	
-	vk_desc_n++;
+	vk_desc_writ[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	vk_desc_writ[b].pNext = 0;
+	vk_desc_writ[b].dstBinding = b;
+	vk_desc_writ[b].dstArrayElement = 0;
+	vk_desc_writ[b].descriptorCount = 1;
+	vk_desc_writ[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	vk_desc_writ[b].pImageInfo = &vk_desc_img;
+	vk_desc_writ[b].pBufferInfo = 0;
+	vk_desc_writ[b].pTexelBufferView = 0;
 }
 
 void gfx_init_push(void* push, uint64_t sz) {
@@ -956,36 +941,43 @@ void gfx_init_push(void* push, uint64_t sz) {
 	vk_push_rng.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 	vk_push_rng.offset = 0;
 	vk_push_rng.size = sz;
-	vk_push_rng_n = 1;
 }
 
-void gfx_init_desc(uint32_t n) {
+void gfx_init_desc_bind(uint32_t n) {
+	vk_desc_n = n;
 	vk_desc_pool_sz = malloc(sizeof(VkDescriptorPoolSize) * n);
-	vk_desc_set = malloc(sizeof(VkDescriptorSet) * n);
-	vk_desc_layt = malloc(sizeof(VkDescriptorSetLayout) * n);
+	vk_desc_layt_bind = malloc(sizeof(VkDescriptorSetLayoutBinding) * n);
 	vk_desc_writ = malloc(sizeof(VkWriteDescriptorSet) * n);
 }
 
-void gfx_set_desc() {
+void gfx_init_desc() {
 	VkDescriptorPoolCreateInfo descpoolinfo;
 		descpoolinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		descpoolinfo.pNext = 0;
 		descpoolinfo.flags = 0;
-		descpoolinfo.maxSets = 2;
+		descpoolinfo.maxSets = 1;
 		descpoolinfo.poolSizeCount = vk_desc_n;
 		descpoolinfo.pPoolSizes = vk_desc_pool_sz;
 	vkCreateDescriptorPool(vk_devc, &descpoolinfo, 0, &vk_desc_pool);
+	
+	VkDescriptorSetLayoutCreateInfo desclaytinfo;
+		desclaytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		desclaytinfo.pNext = 0;
+		desclaytinfo.flags = 0;
+		desclaytinfo.bindingCount = vk_desc_n;
+		desclaytinfo.pBindings = vk_desc_layt_bind;
+	vkCreateDescriptorSetLayout(vk_devc, &desclaytinfo, 0, &vk_desc_layt);
 	
 	VkDescriptorSetAllocateInfo descalcinfo;
 		descalcinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		descalcinfo.pNext = 0;
 		descalcinfo.descriptorPool = vk_desc_pool;
-		descalcinfo.descriptorSetCount = vk_desc_n;
-		descalcinfo.pSetLayouts = vk_desc_layt;
-	vkAllocateDescriptorSets(vk_devc, &descalcinfo, vk_desc_set);
+		descalcinfo.descriptorSetCount = 1;
+		descalcinfo.pSetLayouts = &vk_desc_layt;
+	vkAllocateDescriptorSets(vk_devc, &descalcinfo, &vk_desc_set);
 	
 	for (uint32_t i = 0; i < vk_desc_n; i++) {
-		vk_desc_writ[i].dstSet = vk_desc_set[i];
+		vk_desc_writ[i].dstSet = vk_desc_set;
 	}
 	vkUpdateDescriptorSets(vk_devc, vk_desc_n, vk_desc_writ, 0, 0);
 }
@@ -1030,10 +1022,6 @@ void gfx_set_clr(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void gfx_draw(uint64_t n) {
-	rfsh_vk_vrtx();
-	rfsh_vk_indx();
-	if (vk_unif != 0) rfsh_vk_unif();
-	
 	vkAcquireNextImageKHR(vk_devc, vk_swap, UINT64_MAX, vk_smph_img, 0, &vk_frme_i);
 	
 	init_vk_cmd_draw(n);
@@ -1108,13 +1096,10 @@ void gfx_term() {
 	vkDestroyShaderModule(vk_devc, vk_vrtx_shdr, 0);
 	vkDestroyShaderModule(vk_devc, vk_frag_shdr, 0);
 	
-	vkFreeDescriptorSets(vk_devc, vk_desc_pool, vk_desc_n, vk_desc_set);
-	if (vk_desc_set != 0) free(vk_desc_set);
-	for (uint32_t i = 0; i < vk_desc_n; i++) {
-		vkDestroyDescriptorSetLayout(vk_devc, vk_desc_layt[i], 0);
-	}
+	vkFreeDescriptorSets(vk_devc, vk_desc_pool, 1, &vk_desc_set);
+	vkDestroyDescriptorSetLayout(vk_devc, vk_desc_layt, 0);
 	vkDestroyDescriptorPool(vk_devc, vk_desc_pool, 0);
-	if (vk_desc_layt != 0) free(vk_desc_layt);
+	if (vk_desc_layt_bind != 0) free(vk_desc_layt_bind);
 	if (vk_desc_pool_sz != 0) free(vk_desc_pool_sz);
 	if (vk_desc_writ != 0) free(vk_desc_writ);
 	

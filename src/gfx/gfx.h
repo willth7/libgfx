@@ -17,6 +17,12 @@
 
 #include <stdint.h>
 
+void gfx_rfsh_vrtx();
+
+void gfx_rfsh_indx();
+
+void gfx_rfsh_unif();
+
 void gfx_init(void*);
 
 void gfx_set();
@@ -35,15 +41,15 @@ void gfx_set_vrtx_attr(uint32_t, uint32_t, uint32_t);
 
 void gfx_init_indx(void*, uint64_t);
 
-void gfx_init_unif(void*, uint64_t);
+void gfx_init_unif(uint32_t, void*, uint64_t);
 
-void gfx_init_txtr(uint8_t*, uint32_t, uint32_t);
+void gfx_init_txtr(uint32_t, uint8_t*, uint32_t, uint32_t);
 
 void gfx_init_push(void*, uint64_t);
 
-void gfx_init_desc(uint32_t);
+void gfx_init_desc_bind(uint32_t);
 
-void gfx_set_desc();
+void gfx_init_desc();
 
 void gfx_set_shdr(int8_t*, int8_t*);
 
