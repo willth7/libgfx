@@ -15,7 +15,8 @@
 //TODO
 //	multiple descriptors
 //	multiple buffers
-//	no global variables
+//	multiple pipelines
+//	staging buffers?
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -24,92 +25,65 @@
 #include <string.h>
 #include <stdio.h>
 
-GLFWwindow* glfw_win;
-uint32_t glfw_win_w;
-uint32_t glfw_win_h;
+typedef struct gfx_bfr_s {
+	VkBuffer bfr;
+	VkDeviceMemory mem;
+	VkMemoryRequirements req;
+} gfx_bfr_t;
 
-VkInstance vk_inst;
-VkSurfaceKHR vk_srfc;
-VkDevice vk_devc;
-VkQueue vk_que;
+typedef struct gfx_img_s {
+	VkImage img;
+	VkImageView v;
+	VkDeviceMemory mem;
+	VkMemoryRequirements req;
+} gfx_img_t;
 
-VkCommandPool vk_cmd_pool;
-VkCommandBuffer vk_cmd_draw;
-VkCommandBuffer vk_cmd_txtr;
-VkSemaphore vk_smph_img;
-VkSemaphore vk_smph_drw;
-VkFence vk_fnc;
-VkViewport vk_vprt;
+typedef struct gfx_s {
+	VkInstance inst;
+	VkDevice devc;
+	VkQueue que;
+	VkSemaphore smph_img;
+	VkSemaphore smph_drw;
+	VkFence fnc;
 
-VkShaderModule vk_vrtx_shdr;
-VkShaderModule vk_frag_shdr;
+} gfx_t;
 
-VkRenderPass vk_rndr;
-VkSwapchainKHR vk_swap;
-VkPipelineLayout vk_pipe_layt;
-VkPipeline vk_pipe;
-VkFramebuffer* vk_frme;
-uint32_t vk_frme_i;
+typedef struct gfx_win_s {
+	GLFWwindow* glfw_win;
+	VkSurfaceKHR srfc;
+	uint32_t w;
+	uint32_t h;
+	VkRenderPass rndr;
+	VkPipeline pipe;
+	VkPipelineLayout pipe_layt;
+	VkShaderModule vrtx_shdr;
+	VkShaderModule frag_shdr;
+	VkSwapchainKHR swap;
+	VkImage* swap_img;
+	VkImageView* swap_img_v;
+	VkFramebuffer* frme;
+	uint32_t img_n;
+	uint32_t img_i;
+	gfx_img_t dpth;
+	VkClearValue clr[2];
+} gfx_win_t;
 
-VkImage* vk_swap_img;
-VkImageView* vk_swap_img_v;
-uint32_t vk_swap_img_cnt;
+typedef struct gfx_cmd_s {
+	VkCommandPool pool;
+	VkCommandBuffer draw;
+} gfx_cmd_t;
 
-VkImage vk_dpth_img;
-VkDeviceMemory vk_dpth_mem;
-VkImageView vk_dpth_img_v;
+typedef struct gfx_vrtx_s {
+	gfx_bfr_t* bfr;
+	uint32_t bfr_n;
+	VkPipelineVertexInputStateCreateInfo in;
+	VkVertexInputBindingDescription* bind;
+	uint32_t bind_n;
+	VkVertexInputAttributeDescription* attr;
+	uint32_t attr_n;
+} gfx_vrtx_t;
 
-VkBuffer vk_vrtx_bfr;
-VkDeviceMemory vk_vrtx_mem;
-VkMemoryRequirements vk_vrtx_req;
-void* vk_vrtx;
-uint64_t vk_vrtx_sz;
-VkPipelineVertexInputStateCreateInfo vk_vrtx_in;
-
-VkVertexInputBindingDescription* vk_vrtx_bind;
-uint32_t vk_vrtx_bind_n;
-VkVertexInputAttributeDescription* vk_vrtx_attr;
-uint32_t vk_vrtx_attr_n;
-
-VkBuffer vk_indx_bfr;
-VkDeviceMemory vk_indx_mem;
-VkMemoryRequirements vk_indx_req;
-void* vk_indx;
-uint64_t vk_indx_sz;
-
-VkBuffer vk_unif_bfr;
-VkDeviceMemory vk_unif_mem;
-VkMemoryRequirements vk_unif_req;
-void* vk_unif;
-uint64_t vk_unif_sz;
-
-VkBuffer vk_txtr_bfr;
-VkDeviceMemory vk_txtr_bfr_mem;
-VkMemoryRequirements vk_txtr_bfr_req;
-VkImage vk_txtr_img;
-VkImageView vk_txtr_img_v;
-VkDeviceMemory vk_txtr_img_mem;
-VkMemoryRequirements vk_txtr_img_req;
-VkSampler vk_smpl;
-
-VkPushConstantRange vk_push_rng;
-void* vk_push;
-uint64_t vk_push_sz;
-
-VkDescriptorPool vk_desc_pool;
-VkDescriptorPoolSize* vk_desc_pool_sz;
-VkDescriptorSet vk_desc_set;
-VkDescriptorSetLayoutBinding* vk_desc_layt_bind;
-VkDescriptorSetLayout vk_desc_layt;
-VkWriteDescriptorSet* vk_desc_writ;
-uint32_t vk_desc_n;
-
-VkDescriptorBufferInfo vk_desc_bfr;
-VkDescriptorImageInfo vk_desc_img;
-
-VkClearValue vk_clr[2];
-
-void init_vk_inst() {
+void gfx_init(gfx_t* gfx) {
 	VkInstanceCreateInfo instinfo;
 		instinfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		instinfo.pNext = 0;
@@ -118,14 +92,12 @@ void init_vk_inst() {
 		instinfo.enabledLayerCount = 0;
 		instinfo.ppEnabledLayerNames = 0;
 		instinfo.ppEnabledExtensionNames = glfwGetRequiredInstanceExtensions(&instinfo.enabledExtensionCount);
-	vkCreateInstance(&instinfo, 0, &vk_inst);
-}
+	vkCreateInstance(&instinfo, 0, &(gfx->inst));
 
-void init_vk_devc() {
 	int32_t gpuinfo;
-	vkEnumeratePhysicalDevices(vk_inst, &gpuinfo, 0);
+	vkEnumeratePhysicalDevices(gfx->inst, &gpuinfo, 0);
 	VkPhysicalDevice* gpus = malloc(sizeof(VkPhysicalDevice) * gpuinfo);
-	vkEnumeratePhysicalDevices(vk_inst, &gpuinfo, gpus);
+	vkEnumeratePhysicalDevices(gfx->inst, &gpuinfo, gpus);
 	VkPhysicalDevice gpu = gpus[0];
 	free(gpus);
 	
@@ -133,8 +105,6 @@ void init_vk_devc() {
 	vkGetPhysicalDeviceProperties(gpu, &gpuprop);
 	VkPhysicalDeviceFeatures gpufeat;
 	vkGetPhysicalDeviceFeatures(gpu, &gpufeat);
-	
-	glfwCreateWindowSurface(vk_inst, glfw_win, 0, &vk_srfc);
 	
 	float prio = 0.f;
 	VkDeviceQueueCreateInfo queinfo;
@@ -157,11 +127,29 @@ void init_vk_devc() {
 		devcinfo.enabledExtensionCount = 1;
 		devcinfo.ppEnabledExtensionNames = &ext;
 		devcinfo.pEnabledFeatures = &gpufeat;
-	vkCreateDevice(gpu, &devcinfo, 0, &vk_devc);
-	vkGetDeviceQueue(vk_devc, 0, 0, &vk_que);
+	vkCreateDevice(gpu, &devcinfo, 0, &(gfx->devc));
+	vkGetDeviceQueue(gfx->devc, 0, 0, &(gfx->que));
+	
+	VkSemaphoreCreateInfo smphinfo;
+		smphinfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		smphinfo.pNext = 0;
+		smphinfo.flags = 0;
+	vkCreateSemaphore(gfx->devc, &smphinfo, 0, &(gfx->smph_img));
+	vkCreateSemaphore(gfx->devc, &smphinfo, 0, &(gfx->smph_drw));
+	
+	VkFenceCreateInfo fncinfo;
+		fncinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fncinfo.pNext = 0;
+		fncinfo.flags = 0;
+	vkCreateFence(gfx->devc, &fncinfo, 0, &(gfx->fnc));
 }
 
-void init_vk_rndr() {
+void gfx_init_win(gfx_t* gfx, gfx_win_t* win, GLFWwindow* glfw_win) {
+	win->glfw_win = glfw_win;
+	glfwGetWindowSize(win->glfw_win, &(win->w), &(win->h));
+}
+
+void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
 	VkAttachmentDescription atch[2];
 		atch[0].flags = 0;
 		atch[0].format = VK_FORMAT_B8G8R8A8_SRGB;
@@ -208,54 +196,40 @@ void init_vk_rndr() {
 		rndrinfo.pSubpasses = &subdesc;
 		rndrinfo.dependencyCount = 0;
 		rndrinfo.pDependencies = 0;
-	vkCreateRenderPass(vk_devc, &rndrinfo, 0, &vk_rndr);
+	vkCreateRenderPass(gfx->devc, &rndrinfo, 0, &(win->rndr));
 }
 
-void init_vk_cmd_pool() {
+void gfx_init_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
 	VkCommandPoolCreateInfo cmd_poolinfo;
 		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		cmd_poolinfo.pNext = 0;
 		cmd_poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 		cmd_poolinfo.queueFamilyIndex = 0;
-	vkCreateCommandPool(vk_devc, &cmd_poolinfo, 0, &vk_cmd_pool);
+	vkCreateCommandPool(gfx->devc, &cmd_poolinfo, 0, &(cmd->pool));
 	
 	VkCommandBufferAllocateInfo cmdinfo;
 		cmdinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdinfo.pNext = 0;
-		cmdinfo.commandPool = vk_cmd_pool;
+		cmdinfo.commandPool = cmd->pool;
 		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		cmdinfo.commandBufferCount = 1;
-	vkAllocateCommandBuffers(vk_devc, &cmdinfo, &vk_cmd_draw);
-	vkAllocateCommandBuffers(vk_devc, &cmdinfo, &vk_cmd_txtr);
+	vkAllocateCommandBuffers(gfx->devc, &cmdinfo, &(cmd->draw));
 }
 
-void init_vk_smph() {
-	VkSemaphoreCreateInfo smphinfo;
-		smphinfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-		smphinfo.pNext = 0;
-		smphinfo.flags = 0;
-	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_img);
-	vkCreateSemaphore(vk_devc, &smphinfo, 0, &vk_smph_drw);
+void gfx_init_swap(gfx_t* gfx, gfx_win_t* win) {
+	glfwCreateWindowSurface(gfx->inst, win->glfw_win, 0, &(win->srfc));
 	
-	VkFenceCreateInfo fncinfo;
-		fncinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		fncinfo.pNext = 0;
-		fncinfo.flags = 0;
-	vkCreateFence(vk_devc, &fncinfo, 0, &vk_fnc);
-}
-
-void init_vk_swap() {
-	VkSwapchainKHR swap_anc = vk_swap;
+	VkSwapchainKHR swap_anc = win->swap;
 	VkSwapchainCreateInfoKHR swapinfo;
 		swapinfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 		swapinfo.pNext = 0;
 		swapinfo.flags = 0;
-		swapinfo.surface = vk_srfc;
+		swapinfo.surface = win->srfc;
 		swapinfo.minImageCount = 3;
 		swapinfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
 		swapinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-		swapinfo.imageExtent.width = glfw_win_w;
-		swapinfo.imageExtent.height = glfw_win_h;
+		swapinfo.imageExtent.width = win->w;
+		swapinfo.imageExtent.height = win->h;
 		swapinfo.imageArrayLayers = 1;
 		swapinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 		swapinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -266,15 +240,16 @@ void init_vk_swap() {
 		swapinfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
 		swapinfo.clipped = 1;
 		swapinfo.oldSwapchain = swap_anc;
-	vkCreateSwapchainKHR(vk_devc, &swapinfo, 0, &vk_swap);
+	vkCreateSwapchainKHR(gfx->devc, &swapinfo, 0, &(win->swap));
 	if (swap_anc != 0) {
-		vkDestroySwapchainKHR(vk_devc, swap_anc, 0);
+		vkDestroySwapchainKHR(gfx->devc, swap_anc, 0);
 	}
 	
-	vkGetSwapchainImagesKHR(vk_devc, vk_swap, &vk_swap_img_cnt, 0);
-	vk_swap_img = malloc(sizeof(VkImage) * vk_swap_img_cnt);
-	vkGetSwapchainImagesKHR(vk_devc, vk_swap, &vk_swap_img_cnt, vk_swap_img);
-	vk_swap_img_v = malloc(sizeof(VkImageView) * vk_swap_img_cnt);
+	vkGetSwapchainImagesKHR(gfx->devc, win->swap, &(win->img_n), 0);
+	win->swap_img = malloc(sizeof(VkImage) * win->img_n);
+	vkGetSwapchainImagesKHR(gfx->devc, win->swap, &(win->img_n), win->swap_img);
+	win->swap_img_v = malloc(sizeof(VkImageView) * win->img_n);
+	
 	VkImageViewCreateInfo imgvinfo;
 		imgvinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		imgvinfo.pNext = 0;
@@ -290,21 +265,21 @@ void init_vk_swap() {
 		imgvinfo.subresourceRange.levelCount = 1;
 		imgvinfo.subresourceRange.baseArrayLayer = 0;
 		imgvinfo.subresourceRange.layerCount = 1;
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		imgvinfo.image = vk_swap_img[i];
-		vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_swap_img_v[i]);
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		imgvinfo.image = win->swap_img[i];
+		vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->swap_img_v)[i]);
 	}
 }
 
-void init_vk_dpth() {
+void gfx_init_dpth(gfx_t* gfx, gfx_win_t* win) {
 	VkImageCreateInfo imginfo;
 		imginfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		imginfo.pNext = 0;
 		imginfo.flags = 0;
 		imginfo.imageType = VK_IMAGE_TYPE_2D;
 		imginfo.format = VK_FORMAT_D32_SFLOAT;
-		imginfo.extent.width = glfw_win_w;
-		imginfo.extent.height = glfw_win_h;
+		imginfo.extent.width = win->w;
+		imginfo.extent.height = win->h;
 		imginfo.mipLevels = 1;
 		imginfo.arrayLayers = 1;
 		imginfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -314,23 +289,22 @@ void init_vk_dpth() {
 		imginfo.queueFamilyIndexCount = 0;
 		imginfo.pQueueFamilyIndices = 0;
 		imginfo.initialLayout = 0;
-	vkCreateImage(vk_devc, &imginfo, 0, &vk_dpth_img);
+	vkCreateImage(gfx->devc, &imginfo, 0, &(win->dpth.img));
 	
-	VkMemoryRequirements memreq;
-	vkGetImageMemoryRequirements(vk_devc, vk_dpth_img, &memreq);
+	vkGetImageMemoryRequirements(gfx->devc, win->dpth.img, &(win->dpth.req));
 	VkMemoryAllocateInfo meminfo;
 		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		meminfo.pNext = 0;
-		meminfo.allocationSize = memreq.size;
+		meminfo.allocationSize = win->dpth.req.size;
 		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_dpth_mem);
-	vkBindImageMemory(vk_devc, vk_dpth_img, vk_dpth_mem, 0);
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(win->dpth.mem));
+	vkBindImageMemory(gfx->devc, win->dpth.img, win->dpth.mem, 0);
 	
 	VkImageViewCreateInfo imgvinfo;
 		imgvinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		imgvinfo.pNext = 0;
 		imgvinfo.flags = 0;
-		imgvinfo.image = vk_dpth_img;
+		imgvinfo.image = win->dpth.img;
 		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		imgvinfo.format = VK_FORMAT_D32_SFLOAT;
 		imgvinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -338,25 +312,53 @@ void init_vk_dpth() {
 		imgvinfo.subresourceRange.levelCount = 1;
 		imgvinfo.subresourceRange.baseArrayLayer = 0;
 		imgvinfo.subresourceRange.layerCount = 1;
-	vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_dpth_img_v);
+	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->dpth.v));
 }
 
-void init_vk_pipe() {
-	VkPipelineShaderStageCreateInfo shdinfo[2];
-		shdinfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		shdinfo[0].pNext = 0;
-		shdinfo[0].flags = 0;
-		shdinfo[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		shdinfo[0].module = vk_vrtx_shdr;
-		shdinfo[0].pName = "main";
-		shdinfo[0].pSpecializationInfo = 0;
-		shdinfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		shdinfo[1].pNext = 0;
-		shdinfo[1].flags = 0;
-		shdinfo[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		shdinfo[1].module = vk_frag_shdr;
-		shdinfo[1].pName = "main";
-		shdinfo[1].pSpecializationInfo = 0;
+void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, uint8_t* pthv, uint8_t* pthf, gfx_vrtx_t* vrtx, uint64_t push_sz) {
+	FILE* f = fopen(pthv, "rb");
+	fseek(f, 0, SEEK_END);
+	uint64_t sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	uint32_t* src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+	VkShaderModuleCreateInfo shdinfo;
+		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		shdinfo.pNext = 0;
+		shdinfo.flags = 0;
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->vrtx_shdr));
+	free(src);
+	
+	f = fopen(pthf, "rb");
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->frag_shdr));
+	free(src);
+
+	VkPipelineShaderStageCreateInfo stginfo[2];
+		stginfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stginfo[0].pNext = 0;
+		stginfo[0].flags = 0;
+		stginfo[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stginfo[0].module = win->vrtx_shdr;
+		stginfo[0].pName = "main";
+		stginfo[0].pSpecializationInfo = 0;
+		stginfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stginfo[1].pNext = 0;
+		stginfo[1].flags = 0;
+		stginfo[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stginfo[1].module = win->frag_shdr;
+		stginfo[1].pName = "main";
+		stginfo[1].pSpecializationInfo = 0;
 	
 	VkPipelineInputAssemblyStateCreateInfo inasminfo;
 		inasminfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -365,20 +367,28 @@ void init_vk_pipe() {
 		inasminfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
 		inasminfo.primitiveRestartEnable = 1;
 		
+	VkViewport vprt;
+		vprt.x = 0.f;
+		vprt.y = 0.f;
+		vprt.width = (float) win->w;
+		vprt.height = (float) win->h;
+		vprt.minDepth = 0.f;
+		vprt.maxDepth = 1.f;
+		
 	VkRect2D scsr;
 		scsr.offset.x = 0;
 		scsr.offset.y = 0;
-		scsr.extent.width = glfw_win_w;
-		scsr.extent.height = glfw_win_h;
+		scsr.extent.width = win->w;
+		scsr.extent.height = win->h;
 		
-	VkPipelineViewportStateCreateInfo vk_vprtinfo;
-		vk_vprtinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vk_vprtinfo.pNext = 0;
-		vk_vprtinfo.flags = 0;
-		vk_vprtinfo.viewportCount = 1;
-		vk_vprtinfo.pViewports = &vk_vprt;
-		vk_vprtinfo.scissorCount = 1;
-		vk_vprtinfo.pScissors = &scsr;
+	VkPipelineViewportStateCreateInfo vprtinfo;
+		vprtinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		vprtinfo.pNext = 0;
+		vprtinfo.flags = 0;
+		vprtinfo.viewportCount = 1;
+		vprtinfo.pViewports = &vprt;
+		vprtinfo.scissorCount = 1;
+		vprtinfo.pScissors = &scsr;
 	
 	VkPipelineRasterizationStateCreateInfo rstrinfo;
 		rstrinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -448,6 +458,11 @@ void init_vk_pipe() {
 		dyninfo.flags = 0;
 		dyninfo.dynamicStateCount = 2;
 		dyninfo.pDynamicStates = dyn;
+		
+	VkPushConstantRange pushrng;
+		pushrng.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		pushrng.offset = 0;
+		pushrng.size = push_sz;
 	
 	VkPipelineLayoutCreateInfo pipelaytinfo;
 		pipelaytinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -455,68 +470,159 @@ void init_vk_pipe() {
 		pipelaytinfo.flags = 0;
 		pipelaytinfo.setLayoutCount = 0;
 		pipelaytinfo.pSetLayouts = 0;
-	if (vk_desc_n > 0) {
-		pipelaytinfo.setLayoutCount = 1;
-		pipelaytinfo.pSetLayouts = &vk_desc_layt;
-	}
-		pipelaytinfo.pushConstantRangeCount = 0;
-		pipelaytinfo.pPushConstantRanges = 0;
-	if (vk_push != 0) {
 		pipelaytinfo.pushConstantRangeCount = 1;
-		pipelaytinfo.pPushConstantRanges = &vk_push_rng;
-	}
-	vkCreatePipelineLayout(vk_devc, &pipelaytinfo, 0, &vk_pipe_layt);
+		pipelaytinfo.pPushConstantRanges = &pushrng;
+	vkCreatePipelineLayout(gfx->devc, &pipelaytinfo, 0, &(win->pipe_layt));
 	
 	VkGraphicsPipelineCreateInfo pipeinfo;
 		pipeinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipeinfo.pNext = 0;
 		pipeinfo.flags = 0;
 		pipeinfo.stageCount = 2;
-		pipeinfo.pStages = shdinfo;
-		pipeinfo.pVertexInputState = &vk_vrtx_in;
+		pipeinfo.pStages = stginfo;
+		pipeinfo.pVertexInputState = &(vrtx->in);
 		pipeinfo.pInputAssemblyState = &inasminfo;
 		pipeinfo.pTessellationState = 0;
-		pipeinfo.pViewportState = &vk_vprtinfo;
+		pipeinfo.pViewportState = &vprtinfo;
 		pipeinfo.pRasterizationState = &rstrinfo;
 		pipeinfo.pMultisampleState = &multinfo;
 		pipeinfo.pDepthStencilState = &dpthinfo;
 		pipeinfo.pColorBlendState = &colblndinfo;
 		pipeinfo.pDynamicState = &dyninfo;
-		pipeinfo.layout = vk_pipe_layt;
-		pipeinfo.renderPass = vk_rndr;
+		pipeinfo.layout = win->pipe_layt;
+		pipeinfo.renderPass = win->rndr;
 		pipeinfo.subpass = 0;
 		pipeinfo.basePipelineHandle = 0;
 		pipeinfo.basePipelineIndex = 0;
-	vkCreateGraphicsPipelines(vk_devc, 0, 1, &pipeinfo, 0, &vk_pipe);
+	vkCreateGraphicsPipelines(gfx->devc, 0, 1, &pipeinfo, 0, &(win->pipe));
 }
 
-void init_vk_frme() {
+void gfx_init_frme(gfx_t* gfx, gfx_win_t* win) {
 	VkImageView atch[2];
-	atch[1] = vk_dpth_img_v;
+	atch[1] = win->dpth.v;
 	VkFramebufferCreateInfo fbfrinfo;
 		fbfrinfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		fbfrinfo.pNext = 0;
 		fbfrinfo.flags = 0;
-		fbfrinfo.renderPass = vk_rndr;
+		fbfrinfo.renderPass = win->rndr;
 		fbfrinfo.attachmentCount = 2;
 		fbfrinfo.pAttachments = atch;
-		fbfrinfo.width = glfw_win_w;
-		fbfrinfo.height = glfw_win_h;
+		fbfrinfo.width = win->w;
+		fbfrinfo.height = win->h;
 		fbfrinfo.layers = 1;
-		vk_frme = malloc(sizeof(VkFramebuffer) * vk_swap_img_cnt);
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		atch[0] = vk_swap_img_v[i];
-		vkCreateFramebuffer(vk_devc, &fbfrinfo, 0, &vk_frme[i]);
+		win->frme = malloc(sizeof(VkFramebuffer) * win->img_n);
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		atch[0] = win->swap_img_v[i];
+		vkCreateFramebuffer(gfx->devc, &fbfrinfo, 0, &(win->frme)[i]);
 	}
 }
 
-void init_vk_cmd_draw(uint64_t n) {
+void gfx_rfsh_bfr(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
+	void* memdata;
+	vkMapMemory(gfx->devc, bfr->mem, 0, bfr->req.size, 0, &memdata);
+	memcpy(memdata, data, sz);
+	vkUnmapMemory(gfx->devc, bfr->mem);
+	vkBindBufferMemory(gfx->devc, bfr->bfr, bfr->mem, 0);
+}
+
+void gfx_init_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint64_t sz) {
+	vrtx->bfr = calloc(1, sizeof(gfx_bfr_t));	
+	vrtx->bfr_n = 1;
+	
+	VkBufferCreateInfo bfrinfo;
+		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bfrinfo.pNext = 0;
+		bfrinfo.flags = 0;
+		bfrinfo.size = sz;
+		bfrinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+		bfrinfo.sharingMode = 0;
+		bfrinfo.queueFamilyIndexCount = 0;
+		bfrinfo.pQueueFamilyIndices = 0;
+	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(vrtx->bfr->bfr));
+	
+	vkGetBufferMemoryRequirements(gfx->devc, vrtx->bfr->bfr, &(vrtx->bfr->req));
+	VkMemoryAllocateInfo meminfo;
+		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		meminfo.pNext = 0;
+		meminfo.allocationSize = vrtx->bfr->req.size;
+		meminfo.memoryTypeIndex = 0;
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(vrtx->bfr->mem));
+	
+	vrtx->in.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vrtx->in.pNext = 0;
+	vrtx->in.flags = 0;
+	vrtx->in.vertexBindingDescriptionCount = vrtx->bind_n;
+	vrtx->in.pVertexBindingDescriptions = vrtx->bind;
+	vrtx->in.vertexAttributeDescriptionCount = vrtx->attr_n;
+	vrtx->in.pVertexAttributeDescriptions = vrtx->attr;
+}
+
+void gfx_init_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t n) {
+	vrtx->bind = malloc(sizeof(VkVertexInputBindingDescription) * n);
+	vrtx->bind_n = n;
+}
+
+void gfx_set_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t b, uint32_t s) {
+	vrtx->bind[b].binding = b;
+	vrtx->bind[b].stride = s;
+	vrtx->bind[b].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+}
+
+void gfx_init_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t n) {
+	vrtx->attr = malloc(sizeof(VkVertexInputAttributeDescription) * n);
+	vrtx->attr_n = n;
+}
+
+void gfx_set_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, uint32_t off) {
+	vrtx->attr[l].location = l;
+	vrtx->attr[l].binding = b;
+	vrtx->attr[l].format = VK_FORMAT_R32G32B32A32_SINT;
+	vrtx->attr[l].offset = off;
+}
+
+void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, void* data, uint64_t sz) {
+	gfx_rfsh_bfr(gfx, vrtx->bfr, data, sz);
+}
+
+void gfx_init_indx(gfx_t* gfx, gfx_bfr_t* indx, uint64_t sz) {
+	VkBufferCreateInfo bfrinfo;
+		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bfrinfo.pNext = 0;
+		bfrinfo.flags = 0;
+		bfrinfo.size = sz;
+		bfrinfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+		bfrinfo.sharingMode = 0;
+		bfrinfo.queueFamilyIndexCount = 0;
+		bfrinfo.pQueueFamilyIndices = 0;
+	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(indx->bfr));
+	
+	vkGetBufferMemoryRequirements(gfx->devc, indx->bfr, &(indx->req));
+	VkMemoryAllocateInfo meminfo;
+		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		meminfo.pNext = 0;
+		meminfo.allocationSize = indx->req.size;
+		meminfo.memoryTypeIndex = 0;
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(indx->mem));
+}
+
+void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
+	win->clr[0].color.float32[0] = (float) r / 255;
+	win->clr[0].color.float32[1] = (float) g / 255;
+	win->clr[0].color.float32[2] = (float) b / 255;
+	win->clr[0].color.float32[3] = 1.f;
+	win->clr[1].depthStencil.depth = 1.f;
+	win->clr[1].depthStencil.stencil = 0;
+}
+
+void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, void* desc, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
+	vkAcquireNextImageKHR(gfx->devc, win->swap, UINT64_MAX, gfx->smph_img, 0, &(win->img_i));
+	
 	VkCommandBufferBeginInfo cbfrinfo;
 		cbfrinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		cbfrinfo.pNext = 0;
 		cbfrinfo.flags = 0;
 		cbfrinfo.pInheritanceInfo = 0;
-	vkBeginCommandBuffer(vk_cmd_draw, &cbfrinfo);
+	vkBeginCommandBuffer(cmd->draw, &cbfrinfo);
 	
 	VkImageMemoryBarrier imgmembar;
 		imgmembar.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -527,591 +633,145 @@ void init_vk_cmd_draw(uint64_t n) {
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		imgmembar.srcQueueFamilyIndex = 0;
 		imgmembar.dstQueueFamilyIndex = 0;
-		imgmembar.image = vk_swap_img[vk_frme_i];
+		imgmembar.image = win->swap_img[win->img_i];
 		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imgmembar.subresourceRange.baseMipLevel = 0;
 		imgmembar.subresourceRange.levelCount = 1;
 		imgmembar.subresourceRange.baseArrayLayer = 0;
 		imgmembar.subresourceRange.layerCount = 1;
-	vkCmdPipelineBarrier(vk_cmd_draw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imgmembar);
+	vkCmdPipelineBarrier(cmd->draw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imgmembar);
 	
 	VkRenderPassBeginInfo rndrinfo;
 		rndrinfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		rndrinfo.pNext = 0;
-		rndrinfo.renderPass = vk_rndr;
-		rndrinfo.framebuffer = vk_frme[vk_frme_i];
+		rndrinfo.renderPass = win->rndr;
+		rndrinfo.framebuffer = win->frme[win->img_i];
 		rndrinfo.renderArea.offset.x = 0;
 		rndrinfo.renderArea.offset.y = 0;
-		rndrinfo.renderArea.extent.width = glfw_win_w;
-		rndrinfo.renderArea.extent.height = glfw_win_h;
+		rndrinfo.renderArea.extent.width = win->w;
+		rndrinfo.renderArea.extent.height = win->h;
 		rndrinfo.clearValueCount = 2;
-		rndrinfo.pClearValues = vk_clr;
-	vkCmdBeginRenderPass(vk_cmd_draw, &rndrinfo, VK_SUBPASS_CONTENTS_INLINE);
+		rndrinfo.pClearValues = win->clr;
+	vkCmdBeginRenderPass(cmd->draw, &rndrinfo, VK_SUBPASS_CONTENTS_INLINE);
 	
-	vkCmdBindPipeline(vk_cmd_draw, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipe);
+	vkCmdBindPipeline(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe);
 	
-	vkCmdSetViewport(vk_cmd_draw, 0, 1, &vk_vprt);
+	VkViewport vprt;
+		vprt.x = 0.f;
+		vprt.y = 0.f;
+		vprt.width = (float) win->w;
+		vprt.height = (float) win->h;
+		vprt.minDepth = 0.f;
+		vprt.maxDepth = 1.f;
+	
+	vkCmdSetViewport(cmd->draw, 0, 1, &vprt);
 	
 	VkDeviceSize offset = {0};
-	vkCmdBindVertexBuffers(vk_cmd_draw, 0, 1, &vk_vrtx_bfr, &offset);
-	vkCmdBindIndexBuffer(vk_cmd_draw, vk_indx_bfr, 0, VK_INDEX_TYPE_UINT32);
-	if (vk_desc_n > 0) vkCmdBindDescriptorSets(vk_cmd_draw, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipe_layt, 0, 1, &vk_desc_set, 0, 0);
-	if (vk_push != 0) vkCmdPushConstants(vk_cmd_draw, vk_pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, vk_push_sz, vk_push);
-	vkCmdDrawIndexed(vk_cmd_draw, n, 1, 0, 0, 0);
+	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->bfr_n, &(vrtx->bfr->bfr), &offset);
+	vkCmdBindIndexBuffer(cmd->draw, indx->bfr, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, 0, desc, 0, 0);
+	vkCmdPushConstants(cmd->draw, win->pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
+	vkCmdDrawIndexed(cmd->draw, n, 1, indx_off, vrtx_off, 0);
 	
-	vkCmdEndRenderPass(vk_cmd_draw);
+	vkCmdEndRenderPass(cmd->draw);
 	
 		imgmembar.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 		imgmembar.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 		imgmembar.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	vkCmdPipelineBarrier(vk_cmd_draw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imgmembar);
+	vkCmdPipelineBarrier(cmd->draw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imgmembar);
 	
-	vkEndCommandBuffer(vk_cmd_draw);
-}
-
-void gfx_rfsh_vrtx() {
-	void* data;
-	vkMapMemory(vk_devc, vk_vrtx_mem, 0, vk_vrtx_req.size, 0, &data);
-	memcpy(data, vk_vrtx, vk_vrtx_sz);
-	vkUnmapMemory(vk_devc, vk_vrtx_mem);
-	vkBindBufferMemory(vk_devc, vk_vrtx_bfr, vk_vrtx_mem, 0);
-}
-
-void gfx_rfsh_indx() {
-	void* data;
-	vkMapMemory(vk_devc, vk_indx_mem, 0, vk_indx_req.size, 0, &data);
-	memcpy(data, vk_indx, vk_indx_sz);
-	vkUnmapMemory(vk_devc, vk_indx_mem);
-	vkBindBufferMemory(vk_devc, vk_indx_bfr, vk_indx_mem, 0);
-}
-
-void gfx_rfsh_unif() {
-	void* data;
-	vkMapMemory(vk_devc, vk_unif_mem, 0, vk_unif_req.size, 0, &data);
-	memcpy(data, vk_unif, vk_unif_sz);
-	vkUnmapMemory(vk_devc, vk_unif_mem);
-	vkBindBufferMemory(vk_devc, vk_unif_bfr, vk_unif_mem, 0);
-}
-
-void gfx_init(GLFWwindow* win) {
-	glfw_win = win;
-	glfwGetWindowSize(glfw_win, &glfw_win_w, &glfw_win_h);
-	init_vk_inst();
-	init_vk_devc();
-	init_vk_rndr();
-	init_vk_cmd_pool();
-	init_vk_smph();
-}
-
-void gfx_set() {
-	vk_vprt.x = 0.f;
-	vk_vprt.y = 0.f;
-	vk_vprt.width = (float) glfw_win_w;
-	vk_vprt.height = (float) glfw_win_h;
-	vk_vprt.minDepth = 0.f;
-	vk_vprt.maxDepth = 1.f;
-	init_vk_swap();
-	init_vk_dpth();
-	init_vk_pipe();
-	init_vk_frme();
-}
-
-void gfx_resz(void* v, uint32_t w, uint32_t h) {
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyFramebuffer(vk_devc, vk_frme[i], 0);
-	}
-	free(vk_frme);
-	
-	vkDestroyPipeline(vk_devc, vk_pipe, 0);
-	vkDestroyPipelineLayout(vk_devc, vk_pipe_layt, 0);
-	
-	vkDestroyImageView(vk_devc, vk_dpth_img_v, 0);
-	vkDestroyImage(vk_devc, vk_dpth_img, 0);
-	vkFreeMemory(vk_devc, vk_dpth_mem, 0);
-	
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyImageView(vk_devc, vk_swap_img_v[i], 0);
-	}
-	free(vk_swap_img);
-	free(vk_swap_img_v);
-	
-	glfw_win_w = w;
-	glfw_win_h = h;
-	
-	gfx_set();
-}
-
-void gfx_init_vrtx(void* vrtx, uint64_t sz) {
-	vk_vrtx = vrtx;
-	vk_vrtx_sz = sz;
-	
-	VkBufferCreateInfo bfrinfo;
-		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bfrinfo.pNext = 0;
-		bfrinfo.flags = 0;
-		bfrinfo.size = vk_vrtx_sz;
-		bfrinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(vk_devc, &bfrinfo, 0, &vk_vrtx_bfr);
-	
-	vkGetBufferMemoryRequirements(vk_devc, vk_vrtx_bfr, &vk_vrtx_req);
-	VkMemoryAllocateInfo meminfo;
-		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		meminfo.pNext = 0;
-		meminfo.allocationSize = vk_vrtx_req.size;
-		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_vrtx_mem);
-	
-	vk_vrtx_in.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vk_vrtx_in.pNext = 0;
-	vk_vrtx_in.flags = 0;
-	vk_vrtx_in.vertexBindingDescriptionCount = vk_vrtx_bind_n;
-	vk_vrtx_in.pVertexBindingDescriptions = vk_vrtx_bind;
-	vk_vrtx_in.vertexAttributeDescriptionCount = vk_vrtx_attr_n;
-	vk_vrtx_in.pVertexAttributeDescriptions = vk_vrtx_attr;
-}
-
-void gfx_init_vrtx_bind(uint32_t n) {
-	vk_vrtx_bind = malloc(sizeof(VkVertexInputBindingDescription) * n);
-	vk_vrtx_bind_n = n;
-}
-
-void gfx_set_vrtx_bind(uint32_t b, uint32_t s) {
-	vk_vrtx_bind[b].binding = b;
-	vk_vrtx_bind[b].stride = s;
-	vk_vrtx_bind[b].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-}
-
-void gfx_init_vrtx_attr(uint32_t n) {
-	vk_vrtx_attr = malloc(sizeof(VkVertexInputAttributeDescription) * n);
-	vk_vrtx_attr_n = n;
-}
-
-void gfx_set_vrtx_attr(uint32_t l, uint32_t b, uint32_t off) {
-	vk_vrtx_attr[l].location = l;
-	vk_vrtx_attr[l].binding = b;
-	vk_vrtx_attr[l].format = VK_FORMAT_R32G32B32_SINT;
-	vk_vrtx_attr[l].offset = off;
-}
-
-void gfx_init_indx(void* indx, uint64_t sz) {
-	vk_indx = indx;
-	vk_indx_sz = sz;
-	
-	VkBufferCreateInfo bfrinfo;
-		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bfrinfo.pNext = 0;
-		bfrinfo.flags = 0;
-		bfrinfo.size = vk_indx_sz;
-		bfrinfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(vk_devc, &bfrinfo, 0, &vk_indx_bfr);
-	
-	vkGetBufferMemoryRequirements(vk_devc, vk_indx_bfr, &vk_indx_req);
-	VkMemoryAllocateInfo meminfo;
-		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		meminfo.pNext = 0;
-		meminfo.allocationSize = vk_indx_req.size;
-		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_indx_mem);
-}
-
-void gfx_init_unif(uint32_t b, void* unif, uint64_t sz) {
-	vk_unif = unif;
-	vk_unif_sz = sz;
-
-	VkBufferCreateInfo bfrinfo;
-		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bfrinfo.pNext = 0;
-		bfrinfo.flags = 0;
-		bfrinfo.size = vk_unif_sz;
-		bfrinfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(vk_devc, &bfrinfo, 0, &vk_unif_bfr);
-	
-	vkGetBufferMemoryRequirements(vk_devc, vk_unif_bfr, &vk_unif_req);
-	VkMemoryAllocateInfo meminfo;
-		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		meminfo.pNext = 0;
-		meminfo.allocationSize = vk_unif_req.size;
-		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_unif_mem);
-	
-	vk_desc_pool_sz[b].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	vk_desc_pool_sz[b].descriptorCount = 1;
-	
-	vk_desc_layt_bind[b].binding = b;
-	vk_desc_layt_bind[b].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	vk_desc_layt_bind[b].descriptorCount = 1;
-	vk_desc_layt_bind[b].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	vk_desc_layt_bind[b].pImmutableSamplers = 0;
-	
-	vk_desc_bfr.buffer = vk_unif_bfr;
-	vk_desc_bfr.offset = 0;
-	vk_desc_bfr.range = vk_unif_sz;
-	gfx_rfsh_unif();
-	vk_desc_writ[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	vk_desc_writ[b].pNext = 0;
-	vk_desc_writ[b].dstBinding = b;
-	vk_desc_writ[b].dstArrayElement = 0;
-	vk_desc_writ[b].descriptorCount = 1;
-	vk_desc_writ[b].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	vk_desc_writ[b].pImageInfo = 0;
-	vk_desc_writ[b].pBufferInfo = &vk_desc_bfr;
-	vk_desc_writ[b].pTexelBufferView = 0;
-}
-
-void gfx_init_txtr(uint32_t b, uint8_t* pix, uint32_t w, uint32_t h) {
-	VkBufferCreateInfo bfrinfo;
-		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bfrinfo.pNext = 0;
-		bfrinfo.flags = 0;
-		bfrinfo.size = w * h * 4;
-		bfrinfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(vk_devc, &bfrinfo, 0, &vk_txtr_bfr);
-	
-	vkGetBufferMemoryRequirements(vk_devc, vk_txtr_bfr, &vk_txtr_bfr_req);
-	VkMemoryAllocateInfo meminfo;
-		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		meminfo.pNext = 0;
-		meminfo.allocationSize = vk_txtr_bfr_req.size;
-		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_txtr_bfr_mem);
-	
-	void* data;
-	vkMapMemory(vk_devc, vk_txtr_bfr_mem, 0, vk_txtr_bfr_req.size, 0, &data);
-	memcpy(data, pix, w * h * 4);
-	vkUnmapMemory(vk_devc, vk_txtr_bfr_mem);
-	vkBindBufferMemory(vk_devc, vk_txtr_bfr, vk_txtr_bfr_mem, 0);
-	
-	VkImageCreateInfo imginfo;
-		imginfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		imginfo.pNext = 0;
-		imginfo.flags = 0;
-		imginfo.imageType = VK_IMAGE_TYPE_2D;
-		imginfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-		imginfo.extent.width = w;
-		imginfo.extent.height = h;
-		imginfo.extent.depth = 1;
-		imginfo.mipLevels = 1;
-		imginfo.arrayLayers = 1;
-		imginfo.samples = VK_SAMPLE_COUNT_1_BIT;
-		imginfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-		imginfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		imginfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		imginfo.queueFamilyIndexCount = 0;
-		imginfo.pQueueFamilyIndices = 0;
-		imginfo.initialLayout = 0;
-	vkCreateImage(vk_devc, &imginfo, 0, &vk_txtr_img);
-	
-	vkGetImageMemoryRequirements(vk_devc, vk_txtr_img, &vk_txtr_img_req);
-	meminfo.allocationSize = vk_txtr_img_req.size;
-	vkAllocateMemory(vk_devc, &meminfo, 0, &vk_txtr_img_mem);
-	vkBindImageMemory(vk_devc, vk_txtr_img, vk_txtr_img_mem, 0);
-	
-	VkCommandBufferBeginInfo cbfrinfo;
-		cbfrinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		cbfrinfo.pNext = 0;
-		cbfrinfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		cbfrinfo.pInheritanceInfo = 0;
-	vkBeginCommandBuffer(vk_cmd_txtr, &cbfrinfo);
-	
-	VkImageMemoryBarrier imgmembar;
-		imgmembar.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		imgmembar.pNext = 0;
-		imgmembar.srcAccessMask = 0;
-		imgmembar.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		imgmembar.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		imgmembar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		imgmembar.srcQueueFamilyIndex = 0;
-		imgmembar.dstQueueFamilyIndex = 0;
-		imgmembar.image = vk_txtr_img;
-		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		imgmembar.subresourceRange.baseMipLevel = 0;
-		imgmembar.subresourceRange.levelCount = 1;
-		imgmembar.subresourceRange.baseArrayLayer = 0;
-		imgmembar.subresourceRange.layerCount = 1;
-	vkCmdPipelineBarrier(vk_cmd_txtr, 0, 0, 0, 0, 0, 0, 0, 1, &imgmembar);
-	
-	VkBufferImageCopy cp;
-		cp.bufferOffset = 0;
-		cp.bufferRowLength = 0;
-		cp.bufferImageHeight = 0;
-		cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		cp.imageSubresource.mipLevel = 0;
-		cp.imageSubresource.baseArrayLayer = 0;
-		cp.imageSubresource.layerCount = 1;
-		cp.imageOffset.x = 0;
-		cp.imageOffset.y = 0;
-		cp.imageOffset.z = 0;
-		cp.imageExtent.width = w;
-		cp.imageExtent.height = h;
-		cp.imageExtent.depth = 1;
-	vkCmdCopyBufferToImage(vk_cmd_txtr, vk_txtr_bfr, vk_txtr_img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
-	
-	vkEndCommandBuffer(vk_cmd_txtr);
-	
-	VkSubmitInfo sbmtinfo;
-		sbmtinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		sbmtinfo.pNext = 0;
-		sbmtinfo.waitSemaphoreCount = 0;
-		sbmtinfo.pWaitSemaphores = 0;
-		sbmtinfo.pWaitDstStageMask = 0;
-		sbmtinfo.commandBufferCount = 1;
-		sbmtinfo.pCommandBuffers = &vk_cmd_txtr;
-		sbmtinfo.signalSemaphoreCount = 0;
-		sbmtinfo.pSignalSemaphores = 0;
-	vkQueueSubmit(vk_que, 1, &sbmtinfo, 0);
-	
-	VkImageViewCreateInfo imgvinfo;
-		imgvinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		imgvinfo.pNext = 0;
-		imgvinfo.flags = 0;
-		imgvinfo.image = vk_txtr_img;
-		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgvinfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-		imgvinfo.components.r = 0;
-		imgvinfo.components.g = 0;
-		imgvinfo.components.b = 0;
-		imgvinfo.components.a = 0;
-		imgvinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		imgvinfo.subresourceRange.baseMipLevel = 0;
-		imgvinfo.subresourceRange.levelCount = 1;
-		imgvinfo.subresourceRange.baseArrayLayer = 0;
-		imgvinfo.subresourceRange.layerCount = 1;
-	vkCreateImageView(vk_devc, &imgvinfo, 0, &vk_txtr_img_v);
-	
-	VkSamplerCreateInfo smplinfo;
-		smplinfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-		smplinfo.pNext = 0;
-		smplinfo.flags = 0;
-		smplinfo.magFilter = VK_FILTER_LINEAR;
-		smplinfo.minFilter = VK_FILTER_LINEAR;
-		smplinfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		smplinfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		smplinfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		smplinfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		smplinfo.mipLodBias = 0.f;
-		smplinfo.anisotropyEnable = 1;
-		smplinfo.maxAnisotropy = 0;
-		smplinfo.compareEnable = 0;
-		smplinfo.compareOp = VK_COMPARE_OP_ALWAYS;
-		smplinfo.minLod = 0.f;
-		smplinfo.maxLod = 0.f;
-		smplinfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-		smplinfo.unnormalizedCoordinates = 0;
-	vkCreateSampler(vk_devc, &smplinfo, 0, &vk_smpl);
-	
-	vk_desc_pool_sz[b].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	vk_desc_pool_sz[b].descriptorCount = 1;
-	
-	vk_desc_layt_bind[b].binding = b;
-	vk_desc_layt_bind[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	vk_desc_layt_bind[b].descriptorCount = 1;
-	vk_desc_layt_bind[b].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	vk_desc_layt_bind[b].pImmutableSamplers = 0;
-	
-	vk_desc_img.sampler = vk_smpl;
-	vk_desc_img.imageView = vk_txtr_img_v;
-	vk_desc_img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	vk_desc_writ[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	vk_desc_writ[b].pNext = 0;
-	vk_desc_writ[b].dstBinding = b;
-	vk_desc_writ[b].dstArrayElement = 0;
-	vk_desc_writ[b].descriptorCount = 1;
-	vk_desc_writ[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	vk_desc_writ[b].pImageInfo = &vk_desc_img;
-	vk_desc_writ[b].pBufferInfo = 0;
-	vk_desc_writ[b].pTexelBufferView = 0;
-}
-
-void gfx_init_push(void* push, uint64_t sz) {
-	vk_push = push;
-	vk_push_sz = sz;
-	vk_push_rng.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	vk_push_rng.offset = 0;
-	vk_push_rng.size = sz;
-}
-
-void gfx_init_desc_bind(uint32_t n) {
-	vk_desc_n = n;
-	vk_desc_pool_sz = malloc(sizeof(VkDescriptorPoolSize) * n);
-	vk_desc_layt_bind = malloc(sizeof(VkDescriptorSetLayoutBinding) * n);
-	vk_desc_writ = malloc(sizeof(VkWriteDescriptorSet) * n);
-}
-
-void gfx_init_desc() {
-	VkDescriptorPoolCreateInfo descpoolinfo;
-		descpoolinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		descpoolinfo.pNext = 0;
-		descpoolinfo.flags = 0;
-		descpoolinfo.maxSets = 1;
-		descpoolinfo.poolSizeCount = vk_desc_n;
-		descpoolinfo.pPoolSizes = vk_desc_pool_sz;
-	vkCreateDescriptorPool(vk_devc, &descpoolinfo, 0, &vk_desc_pool);
-	
-	VkDescriptorSetLayoutCreateInfo desclaytinfo;
-		desclaytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		desclaytinfo.pNext = 0;
-		desclaytinfo.flags = 0;
-		desclaytinfo.bindingCount = vk_desc_n;
-		desclaytinfo.pBindings = vk_desc_layt_bind;
-	vkCreateDescriptorSetLayout(vk_devc, &desclaytinfo, 0, &vk_desc_layt);
-	
-	VkDescriptorSetAllocateInfo descalcinfo;
-		descalcinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		descalcinfo.pNext = 0;
-		descalcinfo.descriptorPool = vk_desc_pool;
-		descalcinfo.descriptorSetCount = 1;
-		descalcinfo.pSetLayouts = &vk_desc_layt;
-	vkAllocateDescriptorSets(vk_devc, &descalcinfo, &vk_desc_set);
-	
-	for (uint32_t i = 0; i < vk_desc_n; i++) {
-		vk_desc_writ[i].dstSet = vk_desc_set;
-	}
-	vkUpdateDescriptorSets(vk_devc, vk_desc_n, vk_desc_writ, 0, 0);
-}
-
-void gfx_set_shdr(int8_t* pthv, int8_t* pthf) {
-	FILE* f = fopen(pthv, "rb");
-	fseek(f, 0, SEEK_END);
-	uint64_t sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	uint32_t* src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-	VkShaderModuleCreateInfo shdinfo;
-		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shdinfo.pNext = 0;
-		shdinfo.flags = 0;
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(vk_devc, &shdinfo, 0, &vk_vrtx_shdr);
-	free(src);
-	
-	f = fopen(pthf, "rb");
-	fseek(f, 0, SEEK_END);
-	sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(vk_devc, &shdinfo, 0, &vk_frag_shdr);
-	free(src);
-}
-
-void gfx_set_clr(uint8_t r, uint8_t g, uint8_t b) {
-	vk_clr[0].color.float32[0] = (float) r / 255;
-	vk_clr[0].color.float32[1] = (float) g / 255;
-	vk_clr[0].color.float32[2] = (float) b / 255;
-	vk_clr[0].color.float32[3] = 1.f;
-	vk_clr[1].depthStencil.depth = 1.f;
-	vk_clr[1].depthStencil.stencil = 0;
-}
-
-void gfx_draw(uint64_t n) {
-	vkAcquireNextImageKHR(vk_devc, vk_swap, UINT64_MAX, vk_smph_img, 0, &vk_frme_i);
-	
-	init_vk_cmd_draw(n);
+	vkEndCommandBuffer(cmd->draw);
 	
 	VkPipelineStageFlags pipeflag = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	VkSubmitInfo sbmtinfo;
 		sbmtinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		sbmtinfo.pNext = 0;
 		sbmtinfo.waitSemaphoreCount = 1;
-		sbmtinfo.pWaitSemaphores = &vk_smph_img;
+		sbmtinfo.pWaitSemaphores = &gfx->smph_img;
 		sbmtinfo.pWaitDstStageMask = &pipeflag;
 		sbmtinfo.commandBufferCount = 1;
-		sbmtinfo.pCommandBuffers = &vk_cmd_draw;
+		sbmtinfo.pCommandBuffers = &(cmd->draw);
 		sbmtinfo.signalSemaphoreCount = 1;
-		sbmtinfo.pSignalSemaphores = &vk_smph_drw;
-	vkQueueSubmit(vk_que, 1, &sbmtinfo, vk_fnc);
+		sbmtinfo.pSignalSemaphores = &gfx->smph_drw;
+	vkQueueSubmit(gfx->que, 1, &sbmtinfo, gfx->fnc);
 	
 	VkPresentInfoKHR preinfo;
 		preinfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 		preinfo.pNext = 0;
 		preinfo.waitSemaphoreCount = 1;
-		preinfo.pWaitSemaphores = &vk_smph_drw;
+		preinfo.pWaitSemaphores = &gfx->smph_drw;
 		preinfo.swapchainCount = 1;
-		preinfo.pSwapchains = &vk_swap;
-		preinfo.pImageIndices = &vk_frme_i;
+		preinfo.pSwapchains = &(win->swap);
+		preinfo.pImageIndices = &(win->img_i);
 		preinfo.pResults = 0;
-	vkQueuePresentKHR(vk_que, &preinfo);
+	vkQueuePresentKHR(gfx->que, &preinfo);
 	
-	vkWaitForFences(vk_devc, 1, &vk_fnc, 1, UINT64_MAX);
-	vkResetFences(vk_devc, 1, &vk_fnc);
+	vkWaitForFences(gfx->devc, 1, &(gfx->fnc), 1, UINT64_MAX);
+	vkResetFences(gfx->devc, 1, &(gfx->fnc));
 }
 
-void gfx_term() {
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyFramebuffer(vk_devc, vk_frme[i], 0);
+void gfx_free_bfr(gfx_t* gfx, gfx_bfr_t* bfr) {
+	vkDestroyBuffer(gfx->devc, bfr->bfr, 0);
+	vkFreeMemory(gfx->devc, bfr->mem, 0);
+	free(bfr);
+}
+
+void gfx_free_img(gfx_t* gfx, gfx_img_t* img) {
+	vkDestroyImageView(gfx->devc, img->v, 0);
+	vkDestroyImage(gfx->devc, img->img, 0);
+	vkFreeMemory(gfx->devc, img->mem, 0);
+	free(img);
+}
+
+void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
+	gfx_free_bfr(gfx, vrtx->bfr);
+	free(vrtx->bind);
+	free(vrtx->attr);
+	free(vrtx);
+}
+
+void gfx_free_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
+	vkFreeCommandBuffers(gfx->devc, cmd->pool, 1, &(cmd->draw));
+	vkDestroyCommandPool(gfx->devc, cmd->pool, 0);
+	free(cmd);
+}
+
+void gfx_free_win(gfx_t* gfx, gfx_win_t* win) {
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		vkDestroyFramebuffer(gfx->devc, win->frme[i], 0);
 	}
-	free(vk_frme);
+	free(win->frme);
 	
-	vkDestroyPipeline(vk_devc, vk_pipe, 0);
-	vkDestroyPipelineLayout(vk_devc, vk_pipe_layt, 0);
-	vkDestroyRenderPass(vk_devc, vk_rndr, 0);
+	vkDestroyImageView(gfx->devc, win->dpth.v, 0);
+	vkDestroyImage(gfx->devc, win->dpth.img, 0);
+	vkFreeMemory(gfx->devc, win->dpth.mem, 0);
 	
-	vkDestroyImageView(vk_devc, vk_dpth_img_v, 0);
-	vkDestroyImage(vk_devc, vk_dpth_img, 0);
-	vkFreeMemory(vk_devc, vk_dpth_mem, 0);
-	
-	for (uint32_t i = 0; i < vk_swap_img_cnt; i++) {
-		vkDestroyImageView(vk_devc, vk_swap_img_v[i], 0);
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		vkDestroyImageView(gfx->devc, win->swap_img_v[i], 0);
 	}
-	free(vk_swap_img);
-	free(vk_swap_img_v);
-	vkDestroySwapchainKHR(vk_devc, vk_swap, 0);
+	free(win->swap_img);
+	free(win->swap_img_v);
+	vkDestroySwapchainKHR(gfx->devc, win->swap, 0);
+
+	vkDestroyPipeline(gfx->devc, win->pipe, 0);
+	vkDestroyPipelineLayout(gfx->devc, win->pipe_layt, 0);
 	
-	vkDestroyBuffer(vk_devc, vk_vrtx_bfr, 0);
-	vkFreeMemory(vk_devc, vk_vrtx_mem, 0);
-	if (vk_vrtx_bind != 0) free(vk_vrtx_bind);
-	if (vk_vrtx_attr != 0) free(vk_vrtx_attr);
+	vkDestroyShaderModule(gfx->devc, win->vrtx_shdr, 0);
+	vkDestroyShaderModule(gfx->devc, win->frag_shdr, 0);
 	
-	vkDestroyBuffer(vk_devc, vk_indx_bfr, 0);
-	vkFreeMemory(vk_devc, vk_indx_mem, 0);
+	vkDestroyRenderPass(gfx->devc, win->rndr, 0);
 	
-	vkDestroyBuffer(vk_devc, vk_unif_bfr, 0);
-	vkFreeMemory(vk_devc, vk_unif_mem, 0);
+	vkDestroySurfaceKHR(gfx->inst, win->srfc, 0);
+	free(win);
+}
+
+void gfx_free(gfx_t* gfx) {
+	vkDestroySemaphore(gfx->devc, gfx->smph_img, 0);
+	vkDestroySemaphore(gfx->devc, gfx->smph_drw, 0);
+	vkDestroyFence(gfx->devc, gfx->fnc, 0);
 	
-	vkDestroyBuffer(vk_devc, vk_txtr_bfr, 0);
-	vkFreeMemory(vk_devc, vk_txtr_bfr_mem, 0);
-	vkDestroyImageView(vk_devc, vk_txtr_img_v, 0);
-	vkDestroyImage(vk_devc, vk_txtr_img, 0);
-	vkFreeMemory(vk_devc, vk_txtr_img_mem, 0);
-	vkDestroySampler(vk_devc, vk_smpl, 0);
-	
-	vkDestroyShaderModule(vk_devc, vk_vrtx_shdr, 0);
-	vkDestroyShaderModule(vk_devc, vk_frag_shdr, 0);
-	
-	vkFreeDescriptorSets(vk_devc, vk_desc_pool, 1, &vk_desc_set);
-	vkDestroyDescriptorSetLayout(vk_devc, vk_desc_layt, 0);
-	vkDestroyDescriptorPool(vk_devc, vk_desc_pool, 0);
-	if (vk_desc_layt_bind != 0) free(vk_desc_layt_bind);
-	if (vk_desc_pool_sz != 0) free(vk_desc_pool_sz);
-	if (vk_desc_writ != 0) free(vk_desc_writ);
-	
-	vkFreeCommandBuffers(vk_devc, vk_cmd_pool, 1, &vk_cmd_txtr);
-	vkFreeCommandBuffers(vk_devc, vk_cmd_pool, 1, &vk_cmd_draw);
-	vkDestroyCommandPool(vk_devc, vk_cmd_pool, 0);
-	
-	vkDestroySemaphore(vk_devc, vk_smph_img, 0);
-	vkDestroySemaphore(vk_devc, vk_smph_drw, 0);
-	vkDestroyFence(vk_devc, vk_fnc, 0);
-	
-	vkDestroyDevice(vk_devc, 0);
-	vkDestroySurfaceKHR(vk_inst, vk_srfc, 0);
-	vkDestroyInstance(vk_inst, 0);
+	vkDestroyDevice(gfx->devc, 0);
+	vkDestroyInstance(gfx->inst, 0);
+	free(gfx);
 }
