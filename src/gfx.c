@@ -17,6 +17,7 @@
 //	multiple buffers
 //	multiple pipelines
 //	staging buffers?
+//	resize function
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -83,7 +84,8 @@ typedef struct gfx_vrtx_s {
 	uint32_t attr_n;
 } gfx_vrtx_t;
 
-void gfx_init(gfx_t* gfx) {
+gfx_t* gfx_init() {
+	gfx_t* gfx = malloc(sizeof(gfx_t));
 	VkInstanceCreateInfo instinfo;
 		instinfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		instinfo.pNext = 0;
@@ -142,11 +144,17 @@ void gfx_init(gfx_t* gfx) {
 		fncinfo.pNext = 0;
 		fncinfo.flags = 0;
 	vkCreateFence(gfx->devc, &fncinfo, 0, &(gfx->fnc));
+	
+	return gfx;
 }
 
-void gfx_init_win(gfx_t* gfx, gfx_win_t* win, GLFWwindow* glfw_win) {
+gfx_win_t* gfx_init_win(gfx_t* gfx, GLFWwindow* glfw_win) {
+	gfx_win_t* win = malloc(sizeof(gfx_win_t));
+	
 	win->glfw_win = glfw_win;
 	glfwGetWindowSize(win->glfw_win, &(win->w), &(win->h));
+	
+	return win;
 }
 
 void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
@@ -199,7 +207,9 @@ void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateRenderPass(gfx->devc, &rndrinfo, 0, &(win->rndr));
 }
 
-void gfx_init_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
+gfx_cmd_t* gfx_init_cmd(gfx_t* gfx) {
+	gfx_cmd_t* cmd = malloc(sizeof(gfx_cmd_t));
+	
 	VkCommandPoolCreateInfo cmd_poolinfo;
 		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		cmd_poolinfo.pNext = 0;
@@ -214,6 +224,8 @@ void gfx_init_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
 		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		cmdinfo.commandBufferCount = 1;
 	vkAllocateCommandBuffers(gfx->devc, &cmdinfo, &(cmd->draw));
+	
+	return cmd;
 }
 
 void gfx_init_swap(gfx_t* gfx, gfx_win_t* win) {
@@ -525,8 +537,9 @@ void gfx_rfsh_bfr(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
 	vkBindBufferMemory(gfx->devc, bfr->bfr, bfr->mem, 0);
 }
 
-void gfx_init_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint64_t sz) {
-	vrtx->bfr = calloc(1, sizeof(gfx_bfr_t));	
+gfx_vrtx_t* gfx_init_vrtx(gfx_t* gfx, uint64_t sz) {
+	gfx_vrtx_t* vrtx = malloc(sizeof(gfx_vrtx_t));
+	vrtx->bfr = malloc(sizeof(gfx_bfr_t));	
 	vrtx->bfr_n = 1;
 	
 	VkBufferCreateInfo bfrinfo;
@@ -548,13 +561,7 @@ void gfx_init_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint64_t sz) {
 		meminfo.memoryTypeIndex = 0;
 	vkAllocateMemory(gfx->devc, &meminfo, 0, &(vrtx->bfr->mem));
 	
-	vrtx->in.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vrtx->in.pNext = 0;
-	vrtx->in.flags = 0;
-	vrtx->in.vertexBindingDescriptionCount = vrtx->bind_n;
-	vrtx->in.pVertexBindingDescriptions = vrtx->bind;
-	vrtx->in.vertexAttributeDescriptionCount = vrtx->attr_n;
-	vrtx->in.pVertexAttributeDescriptions = vrtx->attr;
+	return vrtx;
 }
 
 void gfx_init_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t n) {
@@ -573,18 +580,37 @@ void gfx_init_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t n) {
 	vrtx->attr_n = n;
 }
 
-void gfx_set_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, uint32_t off) {
+void gfx_set_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, int8_t sz, uint32_t off) {
 	vrtx->attr[l].location = l;
 	vrtx->attr[l].binding = b;
-	vrtx->attr[l].format = VK_FORMAT_R32G32B32A32_SINT;
+	if (sz == -4) vrtx->attr[l].format = VK_FORMAT_R32_SINT;
+	else if (sz == -8) vrtx->attr[l].format = VK_FORMAT_R32G32_SINT;
+	else if (sz == -12) vrtx->attr[l].format = VK_FORMAT_R32G32B32_SINT;
+	else if (sz == -16) vrtx->attr[l].format = VK_FORMAT_R32G32B32A32_SINT;
+	else if (sz == 4) vrtx->attr[l].format = VK_FORMAT_R32_UINT;
+	else if (sz == 8) vrtx->attr[l].format = VK_FORMAT_R32G32_UINT;
+	else if (sz == 12) vrtx->attr[l].format = VK_FORMAT_R32G32B32_UINT;
+	else if (sz == 16) vrtx->attr[l].format = VK_FORMAT_R32G32B32A32_UINT;
 	vrtx->attr[l].offset = off;
+}
+
+void gfx_set_vrtx_in(gfx_vrtx_t* vrtx) {
+	vrtx->in.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vrtx->in.pNext = 0;
+	vrtx->in.flags = 0;
+	vrtx->in.vertexBindingDescriptionCount = vrtx->bind_n;
+	vrtx->in.pVertexBindingDescriptions = vrtx->bind;
+	vrtx->in.vertexAttributeDescriptionCount = vrtx->attr_n;
+	vrtx->in.pVertexAttributeDescriptions = vrtx->attr;
 }
 
 void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, void* data, uint64_t sz) {
 	gfx_rfsh_bfr(gfx, vrtx->bfr, data, sz);
 }
 
-void gfx_init_indx(gfx_t* gfx, gfx_bfr_t* indx, uint64_t sz) {
+gfx_bfr_t* gfx_init_indx(gfx_t* gfx, uint64_t sz) {
+	gfx_bfr_t* indx = malloc(sizeof(gfx_bfr_t));
+
 	VkBufferCreateInfo bfrinfo;
 		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		bfrinfo.pNext = 0;
@@ -603,6 +629,8 @@ void gfx_init_indx(gfx_t* gfx, gfx_bfr_t* indx, uint64_t sz) {
 		meminfo.allocationSize = indx->req.size;
 		meminfo.memoryTypeIndex = 0;
 	vkAllocateMemory(gfx->devc, &meminfo, 0, &(indx->mem));
+	
+	return indx;
 }
 
 void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
