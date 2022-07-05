@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 //TODO
-//	textures
 //	multiple pipelines
 //	staging buffers?
 //	command buffer threading
@@ -83,6 +82,12 @@ typedef struct gfx_vrtx_s {
 	VkVertexInputAttributeDescription* attr;
 	uint32_t attr_n;
 } gfx_vrtx_t;
+
+typedef struct gfx_txtr_s {
+	gfx_bfr_t bfr;
+	gfx_img_t img;
+	VkSampler smpl;
+} gfx_txtr_t;
 
 typedef struct gfx_dscr_s {
 	VkDescriptorPool pool;
@@ -435,7 +440,7 @@ void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 		multinfo.alphaToCoverageEnable = 0;
 		multinfo.alphaToOneEnable = 0;
 		
-	VkPipelineDepthStencilStateCreateInfo dpthinfo = {};
+	VkPipelineDepthStencilStateCreateInfo dpthinfo;
 		dpthinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 		dpthinfo.pNext = 0;
 		dpthinfo.flags = 0;
@@ -444,6 +449,20 @@ void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 		dpthinfo.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		dpthinfo.depthBoundsTestEnable = 0;
 		dpthinfo.stencilTestEnable = 0;
+		dpthinfo.front.failOp = 0;
+		dpthinfo.front.passOp = 0;
+		dpthinfo.front.depthFailOp = 0;
+		dpthinfo.front.compareOp = 0;
+		dpthinfo.front.compareMask = 0;
+		dpthinfo.front.writeMask = 0;
+		dpthinfo.front.reference = 0;
+		dpthinfo.back.failOp = 0;
+		dpthinfo.back.passOp = 0;
+		dpthinfo.back.depthFailOp = 0;
+		dpthinfo.back.compareOp = 0;
+		dpthinfo.back.compareMask = 0;
+		dpthinfo.back.writeMask = 0;
+		dpthinfo.back.reference = 0;
 		dpthinfo.minDepthBounds = 0.f;
 		dpthinfo.maxDepthBounds = 1.f;
 		
@@ -675,6 +694,165 @@ gfx_bfr_t* gfx_init_unif(gfx_t* gfx, uint64_t sz) {
 	return unif;
 }
 
+gfx_txtr_t* gfx_init_txtr(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, uint32_t h) {
+	gfx_txtr_t* txtr = malloc(sizeof(gfx_txtr_t));
+
+	VkBufferCreateInfo bfrinfo;
+		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bfrinfo.pNext = 0;
+		bfrinfo.flags = 0;
+		bfrinfo.size = w * h * 4;
+		bfrinfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		bfrinfo.sharingMode = 0;
+		bfrinfo.queueFamilyIndexCount = 0;
+		bfrinfo.pQueueFamilyIndices = 0;
+	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(txtr->bfr.bfr));
+	
+	vkGetBufferMemoryRequirements(gfx->devc, txtr->bfr.bfr, &(txtr->bfr.req));
+	VkMemoryAllocateInfo meminfo;
+		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		meminfo.pNext = 0;
+		meminfo.allocationSize = txtr->bfr.req.size;
+		meminfo.memoryTypeIndex = 0;
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(txtr->bfr.mem));
+	
+	gfx_rfsh_bfr(gfx, &(txtr->bfr), pix, w * h * 4);
+	
+	VkImageCreateInfo imginfo;
+		imginfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		imginfo.pNext = 0;
+		imginfo.flags = 0;
+		imginfo.imageType = VK_IMAGE_TYPE_2D;
+		imginfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+		imginfo.extent.width = w;
+		imginfo.extent.height = h;
+		imginfo.extent.depth = 1;
+		imginfo.mipLevels = 1;
+		imginfo.arrayLayers = 1;
+		imginfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imginfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+		imginfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		imginfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		imginfo.queueFamilyIndexCount = 0;
+		imginfo.pQueueFamilyIndices = 0;
+		imginfo.initialLayout = 0;
+	vkCreateImage(gfx->devc, &imginfo, 0, &(txtr->img.img));
+	
+	vkGetImageMemoryRequirements(gfx->devc, txtr->img.img, &(txtr->img.req));
+		meminfo.allocationSize = txtr->img.req.size;
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(txtr->img.mem));
+	vkBindImageMemory(gfx->devc, txtr->img.img, txtr->img.mem, 0);
+	
+	VkCommandBuffer cmd_txtr;
+	VkCommandBufferAllocateInfo cmdinfo;
+		cmdinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdinfo.pNext = 0;
+		cmdinfo.commandPool = cmd->pool;
+		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdinfo.commandBufferCount = 1;
+	vkAllocateCommandBuffers(gfx->devc, &cmdinfo, &cmd_txtr);
+	
+	VkCommandBufferBeginInfo cbfrinfo;
+		cbfrinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		cbfrinfo.pNext = 0;
+		cbfrinfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		cbfrinfo.pInheritanceInfo = 0;
+	vkBeginCommandBuffer(cmd_txtr, &cbfrinfo);
+	
+	VkImageMemoryBarrier imgmembar;
+		imgmembar.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgmembar.pNext = 0;
+		imgmembar.srcAccessMask = 0;
+		imgmembar.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		imgmembar.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imgmembar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		imgmembar.srcQueueFamilyIndex = 0;
+		imgmembar.dstQueueFamilyIndex = 0;
+		imgmembar.image = txtr->img.img;
+		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imgmembar.subresourceRange.baseMipLevel = 0;
+		imgmembar.subresourceRange.levelCount = 1;
+		imgmembar.subresourceRange.baseArrayLayer = 0;
+		imgmembar.subresourceRange.layerCount = 1;
+	vkCmdPipelineBarrier(cmd_txtr, 0, 0, 0, 0, 0, 0, 0, 1, &imgmembar);
+	
+	VkBufferImageCopy cp;
+		cp.bufferOffset = 0;
+		cp.bufferRowLength = 0;
+		cp.bufferImageHeight = 0;
+		cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		cp.imageSubresource.mipLevel = 0;
+		cp.imageSubresource.baseArrayLayer = 0;
+		cp.imageSubresource.layerCount = 1;
+		cp.imageOffset.x = 0;
+		cp.imageOffset.y = 0;
+		cp.imageOffset.z = 0;
+		cp.imageExtent.width = w;
+		cp.imageExtent.height = h;
+		cp.imageExtent.depth = 1;
+	vkCmdCopyBufferToImage(cmd_txtr, txtr->bfr.bfr, txtr->img.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+	
+	vkEndCommandBuffer(cmd_txtr);
+	
+	VkSubmitInfo sbmtinfo;
+		sbmtinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		sbmtinfo.pNext = 0;
+		sbmtinfo.waitSemaphoreCount = 0;
+		sbmtinfo.pWaitSemaphores = 0;
+		sbmtinfo.pWaitDstStageMask = 0;
+		sbmtinfo.commandBufferCount = 1;
+		sbmtinfo.pCommandBuffers = &cmd_txtr;
+		sbmtinfo.signalSemaphoreCount = 0;
+		sbmtinfo.pSignalSemaphores = 0;
+	vkQueueSubmit(gfx->que, 1, &sbmtinfo, gfx->fnc);
+	
+	vkWaitForFences(gfx->devc, 1, &(gfx->fnc), 1, UINT64_MAX);
+	vkResetFences(gfx->devc, 1, &(gfx->fnc));
+	
+	vkFreeCommandBuffers(gfx->devc, cmd->pool, 1, &cmd_txtr);
+	
+	VkImageViewCreateInfo imgvinfo;
+		imgvinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		imgvinfo.pNext = 0;
+		imgvinfo.flags = 0;
+		imgvinfo.image = txtr->img.img;
+		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		imgvinfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+		imgvinfo.components.r = 0;
+		imgvinfo.components.g = 0;
+		imgvinfo.components.b = 0;
+		imgvinfo.components.a = 0;
+		imgvinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imgvinfo.subresourceRange.baseMipLevel = 0;
+		imgvinfo.subresourceRange.levelCount = 1;
+		imgvinfo.subresourceRange.baseArrayLayer = 0;
+		imgvinfo.subresourceRange.layerCount = 1;
+	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(txtr->img.v));
+	
+	VkSamplerCreateInfo smplinfo;
+		smplinfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		smplinfo.pNext = 0;
+		smplinfo.flags = 0;
+		smplinfo.magFilter = VK_FILTER_LINEAR;
+		smplinfo.minFilter = VK_FILTER_LINEAR;
+		smplinfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		smplinfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		smplinfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		smplinfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		smplinfo.mipLodBias = 0.f;
+		smplinfo.anisotropyEnable = 1;
+		smplinfo.maxAnisotropy = 0;
+		smplinfo.compareEnable = 0;
+		smplinfo.compareOp = VK_COMPARE_OP_ALWAYS;
+		smplinfo.minLod = 0.f;
+		smplinfo.maxLod = 0.f;
+		smplinfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+		smplinfo.unnormalizedCoordinates = 0;
+	vkCreateSampler(gfx->devc, &smplinfo, 0, &(txtr->smpl));
+	
+	return txtr;
+}
+
 gfx_dscr_t* gfx_init_dscr(gfx_t* gfx, uint32_t n) {
 	gfx_dscr_t* dscr = malloc(sizeof(gfx_dscr_t));
 	dscr->set = malloc(sizeof(VkDescriptorSet) * n);
@@ -727,40 +905,50 @@ gfx_dscr_t* gfx_init_dscr(gfx_t* gfx, uint32_t n) {
 	return dscr;
 }
 
-void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, void* data, uint64_t sz, void* txtr) {
+void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, void* data, uint64_t sz, gfx_txtr_t* txtr) {
+	VkWriteDescriptorSet writ[2];
+	uint8_t n = 0;
+	
 	VkDescriptorBufferInfo bfr;
+	if (unif != 0) {
 		bfr.buffer = unif->bfr;
 		bfr.offset = 0;
 		bfr.range = sz;
-	gfx_rfsh_bfr(gfx, unif, data, sz);
+		gfx_rfsh_bfr(gfx, unif, data, sz);
+		
+		writ[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writ[n].pNext = 0;
+		writ[n].dstSet = dscr->set[i];
+		writ[n].dstBinding = 0;
+		writ[n].dstArrayElement = 0;
+		writ[n].descriptorCount = 1;
+		writ[n].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		writ[n].pImageInfo = 0;
+		writ[n].pBufferInfo = &bfr;
+		writ[n].pTexelBufferView = 0;
+		n++;
+	}
 	
 	VkDescriptorImageInfo img;
-		img.sampler = 0;
-		img.imageView = 0;
+	if (txtr != 0) {
+		img.sampler = txtr->smpl;
+		img.imageView = txtr->img.v;
 		img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		
+		writ[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writ[n].pNext = 0;
+		writ[n].dstSet = dscr->set[i];
+		writ[n].dstBinding = 1;
+		writ[n].dstArrayElement = 0;
+		writ[n].descriptorCount = 1;
+		writ[n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writ[n].pImageInfo = &img;
+		writ[n].pBufferInfo = 0;
+		writ[n].pTexelBufferView = 0;
+		n++;
+	}
 	
-	VkWriteDescriptorSet writ[2];
-		writ[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writ[0].pNext = 0;
-		writ[0].dstSet = dscr->set[i];
-		writ[0].dstBinding = 0;
-		writ[0].dstArrayElement = 0;
-		writ[0].descriptorCount = 1;
-		writ[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writ[0].pImageInfo = 0;
-		writ[0].pBufferInfo = &bfr;
-		writ[0].pTexelBufferView = 0;
-		writ[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writ[1].pNext = 0;
-		writ[1].dstSet = dscr->set[i];
-		writ[1].dstBinding = 0;
-		writ[1].dstArrayElement = 0;
-		writ[1].descriptorCount = 1;
-		writ[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		writ[1].pImageInfo = &img;
-		writ[1].pBufferInfo = 0;
-		writ[1].pTexelBufferView = 0;
-	vkUpdateDescriptorSets(gfx->devc, 1, writ, 0, 0);
+	vkUpdateDescriptorSets(gfx->devc, n, writ, 0, 0);
 }
 
 void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
@@ -869,7 +1057,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	vkResetFences(gfx->devc, 1, &(gfx->fnc));
 }
 
-void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vrtx, uint64_t sz) {
+void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t sz) {
 	for (uint32_t i = 0; i < win->img_n; i++) {
 		vkDestroyFramebuffer(gfx->devc, win->frme[i], 0);
 	}
@@ -893,7 +1081,7 @@ void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vr
 	
 	gfx_init_swap(gfx, win);
 	gfx_init_dpth(gfx, win);
-	gfx_init_pipe(gfx, win, vrtx, 0, sz);
+	gfx_init_pipe(gfx, win, vrtx, dscr, sz);
 	gfx_init_frme(gfx, win);
 }
 
@@ -921,6 +1109,17 @@ void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
 	free(vrtx->bind);
 	free(vrtx->attr);
 	free(vrtx);
+}
+
+void gfx_free_txtr(gfx_t* gfx, gfx_txtr_t* txtr) {
+	vkDestroyBuffer(gfx->devc, txtr->bfr.bfr, 0);
+	vkFreeMemory(gfx->devc, txtr->bfr.mem, 0);
+	vkDestroyImageView(gfx->devc, txtr->img.v, 0);
+	vkDestroyImage(gfx->devc, txtr->img.img, 0);
+	vkFreeMemory(gfx->devc, txtr->img.mem, 0);
+	vkDestroySampler(gfx->devc, txtr->smpl, 0);
+	
+	free(txtr);
 }
 
 void gfx_free_dscr(gfx_t* gfx, gfx_dscr_t* dscr) {
