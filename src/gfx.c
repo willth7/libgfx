@@ -17,7 +17,6 @@
 //	multiple buffers
 //	multiple pipelines
 //	staging buffers?
-//	resize function
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -50,7 +49,6 @@ typedef struct gfx_s {
 } gfx_t;
 
 typedef struct gfx_win_s {
-	GLFWwindow* glfw_win;
 	VkSurfaceKHR srfc;
 	uint32_t w;
 	uint32_t h;
@@ -75,7 +73,9 @@ typedef struct gfx_cmd_s {
 } gfx_cmd_t;
 
 typedef struct gfx_vrtx_s {
-	gfx_bfr_t* bfr;
+	VkBuffer* bfr;
+	VkDeviceMemory* mem;
+	VkMemoryRequirements* req;
 	uint32_t bfr_n;
 	VkPipelineVertexInputStateCreateInfo in;
 	VkVertexInputBindingDescription* bind;
@@ -151,10 +151,31 @@ gfx_t* gfx_init() {
 gfx_win_t* gfx_init_win(gfx_t* gfx, GLFWwindow* glfw_win) {
 	gfx_win_t* win = malloc(sizeof(gfx_win_t));
 	
-	win->glfw_win = glfw_win;
-	glfwGetWindowSize(win->glfw_win, &(win->w), &(win->h));
+	glfwGetWindowSize(glfw_win, &(win->w), &(win->h));
+	glfwCreateWindowSurface(gfx->inst, glfw_win, 0, &(win->srfc));
 	
 	return win;
+}
+
+gfx_cmd_t* gfx_init_cmd(gfx_t* gfx) {
+	gfx_cmd_t* cmd = malloc(sizeof(gfx_cmd_t));
+	
+	VkCommandPoolCreateInfo cmd_poolinfo;
+		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		cmd_poolinfo.pNext = 0;
+		cmd_poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		cmd_poolinfo.queueFamilyIndex = 0;
+	vkCreateCommandPool(gfx->devc, &cmd_poolinfo, 0, &(cmd->pool));
+	
+	VkCommandBufferAllocateInfo cmdinfo;
+		cmdinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdinfo.pNext = 0;
+		cmdinfo.commandPool = cmd->pool;
+		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdinfo.commandBufferCount = 1;
+	vkAllocateCommandBuffers(gfx->devc, &cmdinfo, &(cmd->draw));
+	
+	return cmd;
 }
 
 void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
@@ -207,30 +228,37 @@ void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateRenderPass(gfx->devc, &rndrinfo, 0, &(win->rndr));
 }
 
-gfx_cmd_t* gfx_init_cmd(gfx_t* gfx) {
-	gfx_cmd_t* cmd = malloc(sizeof(gfx_cmd_t));
+void gfx_init_shdr(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
+	FILE* f = fopen(pthv, "rb");
+	fseek(f, 0, SEEK_END);
+	uint64_t sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	uint32_t* src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+	VkShaderModuleCreateInfo shdinfo;
+		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		shdinfo.pNext = 0;
+		shdinfo.flags = 0;
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->vrtx_shdr));
+	free(src);
 	
-	VkCommandPoolCreateInfo cmd_poolinfo;
-		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		cmd_poolinfo.pNext = 0;
-		cmd_poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		cmd_poolinfo.queueFamilyIndex = 0;
-	vkCreateCommandPool(gfx->devc, &cmd_poolinfo, 0, &(cmd->pool));
-	
-	VkCommandBufferAllocateInfo cmdinfo;
-		cmdinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		cmdinfo.pNext = 0;
-		cmdinfo.commandPool = cmd->pool;
-		cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		cmdinfo.commandBufferCount = 1;
-	vkAllocateCommandBuffers(gfx->devc, &cmdinfo, &(cmd->draw));
-	
-	return cmd;
+	f = fopen(pthf, "rb");
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->frag_shdr));
+	free(src);
 }
 
 void gfx_init_swap(gfx_t* gfx, gfx_win_t* win) {
-	glfwCreateWindowSurface(gfx->inst, win->glfw_win, 0, &(win->srfc));
-	
 	VkSwapchainKHR swap_anc = win->swap;
 	VkSwapchainCreateInfoKHR swapinfo;
 		swapinfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -327,35 +355,7 @@ void gfx_init_dpth(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->dpth.v));
 }
 
-void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, uint8_t* pthv, uint8_t* pthf, gfx_vrtx_t* vrtx, uint64_t push_sz) {
-	FILE* f = fopen(pthv, "rb");
-	fseek(f, 0, SEEK_END);
-	uint64_t sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	uint32_t* src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-	VkShaderModuleCreateInfo shdinfo;
-		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shdinfo.pNext = 0;
-		shdinfo.flags = 0;
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->vrtx_shdr));
-	free(src);
-	
-	f = fopen(pthf, "rb");
-	fseek(f, 0, SEEK_END);
-	sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->frag_shdr));
-	free(src);
-
+void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, uint64_t push_sz) {
 	VkPipelineShaderStageCreateInfo stginfo[2];
 		stginfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[0].pNext = 0;
@@ -537,30 +537,32 @@ void gfx_rfsh_bfr(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
 	vkBindBufferMemory(gfx->devc, bfr->bfr, bfr->mem, 0);
 }
 
-gfx_vrtx_t* gfx_init_vrtx(gfx_t* gfx, uint64_t sz) {
+gfx_vrtx_t* gfx_init_vrtx(gfx_t* gfx, uint32_t bfr_n, uint64_t sz) {
 	gfx_vrtx_t* vrtx = malloc(sizeof(gfx_vrtx_t));
-	vrtx->bfr = malloc(sizeof(gfx_bfr_t));	
-	vrtx->bfr_n = 1;
+	vrtx->bfr = malloc(sizeof(VkBuffer) * bfr_n);
+	vrtx->mem = malloc(sizeof(VkDeviceMemory) * bfr_n);
+	vrtx->req = malloc(sizeof(VkMemoryRequirements) * bfr_n);
+	vrtx->bfr_n = bfr_n;
+	for (uint32_t i = 0; i < bfr_n; i++) {
+		VkBufferCreateInfo bfrinfo;
+			bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+			bfrinfo.pNext = 0;
+			bfrinfo.flags = 0;
+			bfrinfo.size = sz;
+			bfrinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+			bfrinfo.sharingMode = 0;
+			bfrinfo.queueFamilyIndexCount = 0;
+			bfrinfo.pQueueFamilyIndices = 0;
+		vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(vrtx->bfr[i]));
 	
-	VkBufferCreateInfo bfrinfo;
-		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bfrinfo.pNext = 0;
-		bfrinfo.flags = 0;
-		bfrinfo.size = sz;
-		bfrinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(vrtx->bfr->bfr));
-	
-	vkGetBufferMemoryRequirements(gfx->devc, vrtx->bfr->bfr, &(vrtx->bfr->req));
-	VkMemoryAllocateInfo meminfo;
-		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		meminfo.pNext = 0;
-		meminfo.allocationSize = vrtx->bfr->req.size;
-		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(gfx->devc, &meminfo, 0, &(vrtx->bfr->mem));
-	
+		vkGetBufferMemoryRequirements(gfx->devc, vrtx->bfr[i], &(vrtx->req[i]));
+		VkMemoryAllocateInfo meminfo;
+			meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+			meminfo.pNext = 0;
+			meminfo.allocationSize = vrtx->req[i].size;
+			meminfo.memoryTypeIndex = 0;
+		vkAllocateMemory(gfx->devc, &meminfo, 0, &(vrtx->mem[i]));
+	}
 	return vrtx;
 }
 
@@ -604,8 +606,12 @@ void gfx_set_vrtx_in(gfx_vrtx_t* vrtx) {
 	vrtx->in.pVertexAttributeDescriptions = vrtx->attr;
 }
 
-void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, void* data, uint64_t sz) {
-	gfx_rfsh_bfr(gfx, vrtx->bfr, data, sz);
+void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint32_t b, void* data, uint64_t sz) {
+	void* memdata;
+	vkMapMemory(gfx->devc, vrtx->mem[b], 0, vrtx->req[b].size, 0, &memdata);
+	memcpy(memdata, data, sz);
+	vkUnmapMemory(gfx->devc, vrtx->mem[b]);
+	vkBindBufferMemory(gfx->devc, vrtx->bfr[b], vrtx->mem[b], 0);
 }
 
 gfx_bfr_t* gfx_init_indx(gfx_t* gfx, uint64_t sz) {
@@ -695,7 +701,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	vkCmdSetViewport(cmd->draw, 0, 1, &vprt);
 	
 	VkDeviceSize offset = {0};
-	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->bfr_n, &(vrtx->bfr->bfr), &offset);
+	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->bfr_n, vrtx->bfr, &offset);
 	vkCmdBindIndexBuffer(cmd->draw, indx->bfr, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, 0, desc, 0, 0);
 	vkCmdPushConstants(cmd->draw, win->pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
@@ -739,6 +745,34 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	vkResetFences(gfx->devc, 1, &(gfx->fnc));
 }
 
+void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vrtx, uint64_t sz) {
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		vkDestroyFramebuffer(gfx->devc, win->frme[i], 0);
+	}
+	free(win->frme);
+	
+	vkDestroyImageView(gfx->devc, win->dpth.v, 0);
+	vkDestroyImage(gfx->devc, win->dpth.img, 0);
+	vkFreeMemory(gfx->devc, win->dpth.mem, 0);
+	
+	for (uint32_t i = 0; i < win->img_n; i++) {
+		vkDestroyImageView(gfx->devc, win->swap_img_v[i], 0);
+	}
+	free(win->swap_img);
+	free(win->swap_img_v);
+
+	vkDestroyPipeline(gfx->devc, win->pipe, 0);
+	vkDestroyPipelineLayout(gfx->devc, win->pipe_layt, 0);
+	
+	win->w = w;
+	win->h = h;
+	
+	gfx_init_swap(gfx, win);
+	gfx_init_dpth(gfx, win);
+	gfx_init_pipe(gfx, win, vrtx, sz);
+	gfx_init_frme(gfx, win);
+}
+
 void gfx_free_bfr(gfx_t* gfx, gfx_bfr_t* bfr) {
 	vkDestroyBuffer(gfx->devc, bfr->bfr, 0);
 	vkFreeMemory(gfx->devc, bfr->mem, 0);
@@ -753,7 +787,13 @@ void gfx_free_img(gfx_t* gfx, gfx_img_t* img) {
 }
 
 void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
-	gfx_free_bfr(gfx, vrtx->bfr);
+	for (uint32_t i = 0; i < vrtx->bfr_n; i++) {
+		vkDestroyBuffer(gfx->devc, vrtx->bfr[i], 0);
+		vkFreeMemory(gfx->devc, vrtx->mem[i], 0);
+	}
+	free(vrtx->bfr);
+	free(vrtx->mem);
+	free(vrtx->req);
 	free(vrtx->bind);
 	free(vrtx->attr);
 	free(vrtx);
