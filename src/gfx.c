@@ -13,10 +13,10 @@
 //   limitations under the License.
 
 //TODO
-//	multiple descriptors
-//	multiple buffers
+//	textures
 //	multiple pipelines
 //	staging buffers?
+//	command buffer threading
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -83,6 +83,13 @@ typedef struct gfx_vrtx_s {
 	VkVertexInputAttributeDescription* attr;
 	uint32_t attr_n;
 } gfx_vrtx_t;
+
+typedef struct gfx_dscr_s {
+	VkDescriptorPool pool;
+	VkDescriptorSet* set;
+	VkDescriptorSetLayout* layt;
+	uint32_t n;
+} gfx_dscr_t;
 
 gfx_t* gfx_init() {
 	gfx_t* gfx = malloc(sizeof(gfx_t));
@@ -355,7 +362,7 @@ void gfx_init_dpth(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->dpth.v));
 }
 
-void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, uint64_t push_sz) {
+void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t push_sz) {
 	VkPipelineShaderStageCreateInfo stginfo[2];
 		stginfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[0].pNext = 0;
@@ -482,6 +489,10 @@ void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, uint64_t push_s
 		pipelaytinfo.flags = 0;
 		pipelaytinfo.setLayoutCount = 0;
 		pipelaytinfo.pSetLayouts = 0;
+	if (dscr != 0) {
+		pipelaytinfo.setLayoutCount = dscr->n;
+		pipelaytinfo.pSetLayouts = dscr->layt;
+	}
 		pipelaytinfo.pushConstantRangeCount = 1;
 		pipelaytinfo.pPushConstantRanges = &pushrng;
 	vkCreatePipelineLayout(gfx->devc, &pipelaytinfo, 0, &(win->pipe_layt));
@@ -639,6 +650,119 @@ gfx_bfr_t* gfx_init_indx(gfx_t* gfx, uint64_t sz) {
 	return indx;
 }
 
+gfx_bfr_t* gfx_init_unif(gfx_t* gfx, uint64_t sz) {
+	gfx_bfr_t* unif = malloc(sizeof(gfx_bfr_t));
+
+	VkBufferCreateInfo bfrinfo;
+		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bfrinfo.pNext = 0;
+		bfrinfo.flags = 0;
+		bfrinfo.size = sz;
+		bfrinfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		bfrinfo.sharingMode = 0;
+		bfrinfo.queueFamilyIndexCount = 0;
+		bfrinfo.pQueueFamilyIndices = 0;
+	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(unif->bfr));
+	
+	vkGetBufferMemoryRequirements(gfx->devc, unif->bfr, &(unif->req));
+	VkMemoryAllocateInfo meminfo;
+		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		meminfo.pNext = 0;
+		meminfo.allocationSize = unif->req.size;
+		meminfo.memoryTypeIndex = 0;
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(unif->mem));
+	
+	return unif;
+}
+
+gfx_dscr_t* gfx_init_dscr(gfx_t* gfx, uint32_t n) {
+	gfx_dscr_t* dscr = malloc(sizeof(gfx_dscr_t));
+	dscr->set = malloc(sizeof(VkDescriptorSet) * n);
+	dscr->layt = malloc(sizeof(VkDescriptorSetLayout) * n);
+	dscr->n = n;
+	
+	VkDescriptorPoolSize poolsz[2];
+		poolsz[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolsz[0].descriptorCount = n;
+		poolsz[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolsz[1].descriptorCount = n;
+	VkDescriptorPoolCreateInfo poolinfo;
+		poolinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolinfo.pNext = 0;
+		poolinfo.flags = 0;
+		poolinfo.maxSets = n;
+		poolinfo.poolSizeCount = 2;
+		poolinfo.pPoolSizes = poolsz;
+	vkCreateDescriptorPool(gfx->devc, &poolinfo, 0, &(dscr->pool));
+	
+	VkDescriptorSetLayoutBinding bind[2];
+		bind[0].binding = 0;
+		bind[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bind[0].descriptorCount = 1;
+		bind[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bind[0].pImmutableSamplers = 0;
+		bind[1].binding = 1;
+		bind[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		bind[1].descriptorCount = 1;
+		bind[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bind[1].pImmutableSamplers = 0;
+	
+	VkDescriptorSetLayoutCreateInfo laytinfo;
+		laytinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		laytinfo.pNext = 0;
+		laytinfo.flags = 0;
+		laytinfo.bindingCount = 2;
+		laytinfo.pBindings = bind;
+	for (uint32_t i = 0; i < n; i++) {
+		vkCreateDescriptorSetLayout(gfx->devc, &laytinfo, 0, &(dscr->layt[i]));
+	}
+	VkDescriptorSetAllocateInfo setalc;
+		setalc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		setalc.pNext = 0;
+		setalc.descriptorPool = dscr->pool;
+		setalc.descriptorSetCount = n;
+		setalc.pSetLayouts = dscr->layt;
+	vkAllocateDescriptorSets(gfx->devc, &setalc, dscr->set);
+	
+	return dscr;
+}
+
+void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, void* data, uint64_t sz, void* txtr) {
+	VkDescriptorBufferInfo bfr;
+		bfr.buffer = unif->bfr;
+		bfr.offset = 0;
+		bfr.range = sz;
+	gfx_rfsh_bfr(gfx, unif, data, sz);
+	
+	VkDescriptorImageInfo img;
+		img.sampler = 0;
+		img.imageView = 0;
+		img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	
+	VkWriteDescriptorSet writ[2];
+		writ[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writ[0].pNext = 0;
+		writ[0].dstSet = dscr->set[i];
+		writ[0].dstBinding = 0;
+		writ[0].dstArrayElement = 0;
+		writ[0].descriptorCount = 1;
+		writ[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		writ[0].pImageInfo = 0;
+		writ[0].pBufferInfo = &bfr;
+		writ[0].pTexelBufferView = 0;
+		writ[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writ[1].pNext = 0;
+		writ[1].dstSet = dscr->set[i];
+		writ[1].dstBinding = 0;
+		writ[1].dstArrayElement = 0;
+		writ[1].descriptorCount = 1;
+		writ[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writ[1].pImageInfo = &img;
+		writ[1].pBufferInfo = 0;
+		writ[1].pTexelBufferView = 0;
+	vkUpdateDescriptorSets(gfx->devc, 1, writ, 0, 0);
+}
+
 void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
 	win->clr[0].color.float32[0] = (float) r / 255;
 	win->clr[0].color.float32[1] = (float) g / 255;
@@ -648,7 +772,7 @@ void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
 	win->clr[1].depthStencil.stencil = 0;
 }
 
-void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, void* desc, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
+void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
 	vkAcquireNextImageKHR(gfx->devc, win->swap, UINT64_MAX, gfx->smph_img, 0, &(win->img_i));
 	
 	VkCommandBufferBeginInfo cbfrinfo;
@@ -703,7 +827,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	VkDeviceSize offset = {0};
 	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->bfr_n, vrtx->bfr, &offset);
 	vkCmdBindIndexBuffer(cmd->draw, indx->bfr, 0, VK_INDEX_TYPE_UINT32);
-	vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, 0, desc, 0, 0);
+	if (dscr != 0) vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, dscr->n, dscr->set, 0, 0);
 	vkCmdPushConstants(cmd->draw, win->pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
 	vkCmdDrawIndexed(cmd->draw, n, 1, indx_off, vrtx_off, 0);
 	
@@ -769,7 +893,7 @@ void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vr
 	
 	gfx_init_swap(gfx, win);
 	gfx_init_dpth(gfx, win);
-	gfx_init_pipe(gfx, win, vrtx, sz);
+	gfx_init_pipe(gfx, win, vrtx, 0, sz);
 	gfx_init_frme(gfx, win);
 }
 
@@ -797,6 +921,18 @@ void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
 	free(vrtx->bind);
 	free(vrtx->attr);
 	free(vrtx);
+}
+
+void gfx_free_dscr(gfx_t* gfx, gfx_dscr_t* dscr) {
+	vkFreeDescriptorSets(gfx->devc, dscr->pool, dscr->n, dscr->set);
+	for (uint32_t i = 0; i < dscr->n; i++) {
+		vkDestroyDescriptorSetLayout(gfx->devc, dscr->layt[i], 0);
+	}
+	vkDestroyDescriptorPool(gfx->devc, dscr->pool, 0);
+	
+	free(dscr->set);
+	free(dscr->layt);
+	free(dscr);
 }
 
 void gfx_free_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
