@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 //TODO
-//	multiple pipelines
 //	staging buffers?
 //	command buffer threading
 
@@ -52,10 +51,6 @@ typedef struct gfx_win_s {
 	uint32_t w;
 	uint32_t h;
 	VkRenderPass rndr;
-	VkPipeline pipe;
-	VkPipelineLayout pipe_layt;
-	VkShaderModule vrtx_shdr;
-	VkShaderModule frag_shdr;
 	VkSwapchainKHR swap;
 	VkImage* swap_img;
 	VkImageView* swap_img_v;
@@ -70,6 +65,13 @@ typedef struct gfx_cmd_s {
 	VkCommandPool pool;
 	VkCommandBuffer draw;
 } gfx_cmd_t;
+
+typedef struct gfx_pipe_s {
+	VkPipeline pipe;
+	VkPipelineLayout layt;
+	VkShaderModule vrtx_shdr;
+	VkShaderModule frag_shdr;
+} gfx_pipe_t;
 
 typedef struct gfx_vrtx_s {
 	VkBuffer* bfr;
@@ -159,7 +161,7 @@ gfx_t* gfx_init() {
 }
 
 gfx_win_t* gfx_win_init(gfx_t* gfx, GLFWwindow* glfw_win) {
-	gfx_win_t* win = malloc(sizeof(gfx_win_t));
+	gfx_win_t* win = calloc(1, sizeof(gfx_win_t));
 	
 	glfwGetWindowSize(glfw_win, &(win->w), &(win->h));
 	glfwCreateWindowSurface(gfx->inst, glfw_win, 0, &(win->srfc));
@@ -239,33 +241,7 @@ void gfx_rndr_init(gfx_t* gfx, gfx_win_t* win) {
 }
 
 void gfx_shdr_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
-	FILE* f = fopen(pthv, "rb");
-	fseek(f, 0, SEEK_END);
-	uint64_t sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	uint32_t* src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-	VkShaderModuleCreateInfo shdinfo;
-		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shdinfo.pNext = 0;
-		shdinfo.flags = 0;
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->vrtx_shdr));
-	free(src);
 	
-	f = fopen(pthf, "rb");
-	fseek(f, 0, SEEK_END);
-	sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	src = malloc(sz);
-	fread(src, sz, 1, f);
-	fclose(f);
-		shdinfo.codeSize = sz;
-		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(win->frag_shdr));
-	free(src);
 }
 
 void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
@@ -291,6 +267,7 @@ void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 		swapinfo.clipped = 1;
 		swapinfo.oldSwapchain = swap_anc;
 	vkCreateSwapchainKHR(gfx->devc, &swapinfo, 0, &(win->swap));
+	
 	if (swap_anc != 0) {
 		vkDestroySwapchainKHR(gfx->devc, swap_anc, 0);
 	}
@@ -365,20 +342,50 @@ void gfx_dpth_init(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->dpth.v));
 }
 
-void gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t push_sz) {
+gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t push_sz) {
+	gfx_pipe_t* pipe = malloc(sizeof(gfx_pipe_t));
+	
+	FILE* f = fopen(pthv, "rb");
+	fseek(f, 0, SEEK_END);
+	uint64_t sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	uint32_t* src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+	VkShaderModuleCreateInfo shdinfo;
+		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		shdinfo.pNext = 0;
+		shdinfo.flags = 0;
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(pipe->vrtx_shdr));
+	free(src);
+	
+	f = fopen(pthf, "rb");
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	src = malloc(sz);
+	fread(src, sz, 1, f);
+	fclose(f);
+		shdinfo.codeSize = sz;
+		shdinfo.pCode = src;
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(pipe->frag_shdr));
+	free(src);
+	
 	VkPipelineShaderStageCreateInfo stginfo[2];
 		stginfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[0].pNext = 0;
 		stginfo[0].flags = 0;
 		stginfo[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stginfo[0].module = win->vrtx_shdr;
+		stginfo[0].module = pipe->vrtx_shdr;
 		stginfo[0].pName = "main";
 		stginfo[0].pSpecializationInfo = 0;
 		stginfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[1].pNext = 0;
 		stginfo[1].flags = 0;
 		stginfo[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stginfo[1].module = win->frag_shdr;
+		stginfo[1].module = pipe->frag_shdr;
 		stginfo[1].pName = "main";
 		stginfo[1].pSpecializationInfo = 0;
 	
@@ -487,7 +494,7 @@ void gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 		colblndinfo.blendConstants[2] = 0.f;
 		colblndinfo.blendConstants[3] = 0.f;
 		
-	VkDynamicState dyn[] = { VK_DYNAMIC_STATE_VIEWPORT };
+	VkDynamicState dyn[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 	VkPipelineDynamicStateCreateInfo dyninfo;
 		dyninfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dyninfo.pNext = 0;
@@ -512,7 +519,7 @@ void gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 	}
 		pipelaytinfo.pushConstantRangeCount = 1;
 		pipelaytinfo.pPushConstantRanges = &pushrng;
-	vkCreatePipelineLayout(gfx->devc, &pipelaytinfo, 0, &(win->pipe_layt));
+	vkCreatePipelineLayout(gfx->devc, &pipelaytinfo, 0, &(pipe->layt));
 	
 	VkGraphicsPipelineCreateInfo pipeinfo;
 		pipeinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -529,12 +536,14 @@ void gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 		pipeinfo.pDepthStencilState = &dpthinfo;
 		pipeinfo.pColorBlendState = &colblndinfo;
 		pipeinfo.pDynamicState = &dyninfo;
-		pipeinfo.layout = win->pipe_layt;
+		pipeinfo.layout = pipe->layt;
 		pipeinfo.renderPass = win->rndr;
 		pipeinfo.subpass = 0;
 		pipeinfo.basePipelineHandle = 0;
 		pipeinfo.basePipelineIndex = 0;
-	vkCreateGraphicsPipelines(gfx->devc, 0, 1, &pipeinfo, 0, &(win->pipe));
+	vkCreateGraphicsPipelines(gfx->devc, 0, 1, &pipeinfo, 0, &(pipe->pipe));
+	
+	return pipe;
 }
 
 void gfx_frme_init(gfx_t* gfx, gfx_win_t* win) {
@@ -956,7 +965,7 @@ void gfx_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
 	win->clr[1].depthStencil.stencil = 0;
 }
 
-void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
+void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
 	vkAcquireNextImageKHR(gfx->devc, win->swap, UINT64_MAX, gfx->smph_img, 0, &(win->img_i));
 	
 	VkCommandBufferBeginInfo cbfrinfo;
@@ -996,7 +1005,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 		rndrinfo.pClearValues = win->clr;
 	vkCmdBeginRenderPass(cmd->draw, &rndrinfo, VK_SUBPASS_CONTENTS_INLINE);
 	
-	vkCmdBindPipeline(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe);
+	vkCmdBindPipeline(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->pipe);
 	
 	VkViewport vprt;
 		vprt.x = 0.f;
@@ -1005,14 +1014,20 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 		vprt.height = (float) win->h;
 		vprt.minDepth = 0.f;
 		vprt.maxDepth = 1.f;
-	
 	vkCmdSetViewport(cmd->draw, 0, 1, &vprt);
+		
+	VkRect2D scsr;
+		scsr.offset.x = 0;
+		scsr.offset.y = 0;
+		scsr.extent.width = win->w;
+		scsr.extent.height = win->h;
+	vkCmdSetScissor(cmd->draw, 0, 1, &scsr);
 	
 	VkDeviceSize offset = {0};
 	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->b, vrtx->bfr, &offset);
 	vkCmdBindIndexBuffer(cmd->draw, indx->bfr, 0, VK_INDEX_TYPE_UINT32);
-	if (dscr != 0) vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, dscr->n, dscr->set, 0, 0);
-	vkCmdPushConstants(cmd->draw, win->pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
+	if (dscr != 0) vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layt, 0, dscr->n, dscr->set, 0, 0);
+	vkCmdPushConstants(cmd->draw, pipe->layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
 	vkCmdDrawIndexed(cmd->draw, n, 1, indx_off, vrtx_off, 0);
 	
 	vkCmdEndRenderPass(cmd->draw);
@@ -1053,7 +1068,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	vkResetFences(gfx->devc, 1, &(gfx->fnc));
 }
 
-void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t sz) {
+void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h) {
 	for (uint32_t i = 0; i < win->img_n; i++) {
 		vkDestroyFramebuffer(gfx->devc, win->frme[i], 0);
 	}
@@ -1068,16 +1083,12 @@ void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vr
 	}
 	free(win->swap_img);
 	free(win->swap_img_v);
-
-	vkDestroyPipeline(gfx->devc, win->pipe, 0);
-	vkDestroyPipelineLayout(gfx->devc, win->pipe_layt, 0);
 	
 	win->w = w;
 	win->h = h;
 	
 	gfx_swap_init(gfx, win);
 	gfx_dpth_init(gfx, win);
-	gfx_pipe_init(gfx, win, vrtx, dscr, sz);
 	gfx_frme_init(gfx, win);
 }
 
@@ -1128,6 +1139,14 @@ void gfx_dscr_free(gfx_t* gfx, gfx_dscr_t* dscr) {
 	free(dscr);
 }
 
+void gfx_pipe_free(gfx_t* gfx, gfx_pipe_t* pipe) {
+	vkDestroyPipeline(gfx->devc, pipe->pipe, 0);
+	vkDestroyPipelineLayout(gfx->devc, pipe->layt, 0);
+	vkDestroyShaderModule(gfx->devc, pipe->vrtx_shdr, 0);
+	vkDestroyShaderModule(gfx->devc, pipe->frag_shdr, 0);
+	free(pipe);
+}
+
 void gfx_cmd_free(gfx_t* gfx, gfx_cmd_t* cmd) {
 	vkFreeCommandBuffers(gfx->devc, cmd->pool, 1, &(cmd->draw));
 	vkDestroyCommandPool(gfx->devc, cmd->pool, 0);
@@ -1150,12 +1169,6 @@ void gfx_win_free(gfx_t* gfx, gfx_win_t* win) {
 	free(win->swap_img);
 	free(win->swap_img_v);
 	vkDestroySwapchainKHR(gfx->devc, win->swap, 0);
-
-	vkDestroyPipeline(gfx->devc, win->pipe, 0);
-	vkDestroyPipelineLayout(gfx->devc, win->pipe_layt, 0);
-	
-	vkDestroyShaderModule(gfx->devc, win->vrtx_shdr, 0);
-	vkDestroyShaderModule(gfx->devc, win->frag_shdr, 0);
 	
 	vkDestroyRenderPass(gfx->devc, win->rndr, 0);
 	
