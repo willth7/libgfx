@@ -77,7 +77,11 @@ void gfx_dscr_writ(gfx_t*, gfx_dscr_t*, uint32_t, gfx_bfr_t*, void*, uint64_t, g
 
 void gfx_clr(gfx_win_t*, uint8_t, uint8_t, uint8_t);
 
+void gfx_next(gfx_t*, gfx_win_t*, gfx_cmd_t*);
+
 void gfx_draw(gfx_t*, gfx_win_t*, gfx_pipe_t*, gfx_cmd_t*, gfx_bfr_t*, gfx_vrtx_t*, gfx_dscr_t*, void*, uint64_t, uint32_t, uint32_t, uint32_t);
+
+void gfx_swap(gfx_t*, gfx_win_t*, gfx_cmd_t*);
 
 void gfx_resz(gfx_t*, gfx_win_t*, uint32_t, uint32_t);
 

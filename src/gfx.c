@@ -13,8 +13,10 @@
 //   limitations under the License.
 
 //TODO
-//	staging buffers?
+//	improve multiple windows
 //	command buffer threading
+//	multiple render passes?
+//	staging buffers?
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
@@ -69,8 +71,6 @@ typedef struct gfx_cmd_s {
 typedef struct gfx_pipe_s {
 	VkPipeline pipe;
 	VkPipelineLayout layt;
-	VkShaderModule vrtx_shdr;
-	VkShaderModule frag_shdr;
 } gfx_pipe_t;
 
 typedef struct gfx_vrtx_s {
@@ -352,13 +352,15 @@ gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf
 	uint32_t* src = malloc(sz);
 	fread(src, sz, 1, f);
 	fclose(f);
+	
+	VkShaderModule shdv;
 	VkShaderModuleCreateInfo shdinfo;
 		shdinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		shdinfo.pNext = 0;
 		shdinfo.flags = 0;
 		shdinfo.codeSize = sz;
 		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(pipe->vrtx_shdr));
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &shdv);
 	free(src);
 	
 	f = fopen(pthf, "rb");
@@ -368,9 +370,11 @@ gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf
 	src = malloc(sz);
 	fread(src, sz, 1, f);
 	fclose(f);
+	
+	VkShaderModule shdf;
 		shdinfo.codeSize = sz;
 		shdinfo.pCode = src;
-	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &(pipe->frag_shdr));
+	vkCreateShaderModule(gfx->devc, &shdinfo, 0, &shdf);
 	free(src);
 	
 	VkPipelineShaderStageCreateInfo stginfo[2];
@@ -378,14 +382,14 @@ gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf
 		stginfo[0].pNext = 0;
 		stginfo[0].flags = 0;
 		stginfo[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stginfo[0].module = pipe->vrtx_shdr;
+		stginfo[0].module = shdv;
 		stginfo[0].pName = "main";
 		stginfo[0].pSpecializationInfo = 0;
 		stginfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[1].pNext = 0;
 		stginfo[1].flags = 0;
 		stginfo[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stginfo[1].module = pipe->frag_shdr;
+		stginfo[1].module = shdf;
 		stginfo[1].pName = "main";
 		stginfo[1].pSpecializationInfo = 0;
 	
@@ -399,16 +403,16 @@ gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf
 	VkViewport vprt;
 		vprt.x = 0.f;
 		vprt.y = 0.f;
-		vprt.width = (float) win->w;
-		vprt.height = (float) win->h;
+		vprt.width = 1.f;
+		vprt.height = 1.f;
 		vprt.minDepth = 0.f;
 		vprt.maxDepth = 1.f;
 		
 	VkRect2D scsr;
 		scsr.offset.x = 0;
 		scsr.offset.y = 0;
-		scsr.extent.width = win->w;
-		scsr.extent.height = win->h;
+		scsr.extent.width = 1;
+		scsr.extent.height = 1;
 		
 	VkPipelineViewportStateCreateInfo vprtinfo;
 		vprtinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -542,6 +546,9 @@ gfx_pipe_t* gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf
 		pipeinfo.basePipelineHandle = 0;
 		pipeinfo.basePipelineIndex = 0;
 	vkCreateGraphicsPipelines(gfx->devc, 0, 1, &pipeinfo, 0, &(pipe->pipe));
+	
+	vkDestroyShaderModule(gfx->devc, shdv, 0);
+	vkDestroyShaderModule(gfx->devc, shdf, 0);
 	
 	return pipe;
 }
@@ -965,7 +972,7 @@ void gfx_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
 	win->clr[1].depthStencil.stencil = 0;
 }
 
-void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
+void gfx_next(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd) {
 	vkAcquireNextImageKHR(gfx->devc, win->swap, UINT64_MAX, gfx->smph_img, 0, &(win->img_i));
 	
 	VkCommandBufferBeginInfo cbfrinfo;
@@ -1004,7 +1011,9 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_
 		rndrinfo.clearValueCount = 2;
 		rndrinfo.pClearValues = win->clr;
 	vkCmdBeginRenderPass(cmd->draw, &rndrinfo, VK_SUBPASS_CONTENTS_INLINE);
-	
+}
+
+void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, void* push, uint64_t push_sz, uint32_t n, uint32_t indx_off, uint32_t vrtx_off) {
 	vkCmdBindPipeline(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->pipe);
 	
 	VkViewport vprt;
@@ -1015,7 +1024,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_
 		vprt.minDepth = 0.f;
 		vprt.maxDepth = 1.f;
 	vkCmdSetViewport(cmd->draw, 0, 1, &vprt);
-		
+	
 	VkRect2D scsr;
 		scsr.offset.x = 0;
 		scsr.offset.y = 0;
@@ -1029,17 +1038,30 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_pipe_t* pipe, gfx_cmd_t* cmd, gfx_
 	if (dscr != 0) vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layt, 0, dscr->n, dscr->set, 0, 0);
 	vkCmdPushConstants(cmd->draw, pipe->layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
 	vkCmdDrawIndexed(cmd->draw, n, 1, indx_off, vrtx_off, 0);
-	
+}
+
+void gfx_swap(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd) {
 	vkCmdEndRenderPass(cmd->draw);
 	
+	VkImageMemoryBarrier imgmembar;
+		imgmembar.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgmembar.pNext = 0;
 		imgmembar.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 		imgmembar.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 		imgmembar.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		imgmembar.srcQueueFamilyIndex = 0;
+		imgmembar.dstQueueFamilyIndex = 0;
+		imgmembar.image = win->swap_img[win->img_i];
+		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imgmembar.subresourceRange.baseMipLevel = 0;
+		imgmembar.subresourceRange.levelCount = 1;
+		imgmembar.subresourceRange.baseArrayLayer = 0;
+		imgmembar.subresourceRange.layerCount = 1;
 	vkCmdPipelineBarrier(cmd->draw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imgmembar);
 	
 	vkEndCommandBuffer(cmd->draw);
-	
+
 	VkPipelineStageFlags pipeflag = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	VkSubmitInfo sbmtinfo;
 		sbmtinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1142,8 +1164,6 @@ void gfx_dscr_free(gfx_t* gfx, gfx_dscr_t* dscr) {
 void gfx_pipe_free(gfx_t* gfx, gfx_pipe_t* pipe) {
 	vkDestroyPipeline(gfx->devc, pipe->pipe, 0);
 	vkDestroyPipelineLayout(gfx->devc, pipe->layt, 0);
-	vkDestroyShaderModule(gfx->devc, pipe->vrtx_shdr, 0);
-	vkDestroyShaderModule(gfx->devc, pipe->frag_shdr, 0);
 	free(pipe);
 }
 
