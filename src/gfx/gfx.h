@@ -35,69 +35,65 @@ typedef gfx_dscr_t;
 
 gfx_t* gfx_init();
 
-gfx_win_t* gfx_init_win(gfx_t*, void*);
+gfx_win_t* gfx_win_init(gfx_t*, void*);
 
-gfx_cmd_t* gfx_init_cmd(gfx_t*);
+gfx_cmd_t* gfx_cmd_init(gfx_t*);
 
-void gfx_init_rndr(gfx_t*, gfx_win_t*);
+void gfx_rndr_init(gfx_t*, gfx_win_t*);
 
-void gfx_init_shdr(gfx_t*, gfx_win_t*, int8_t*, int8_t*);
+void gfx_shdr_init(gfx_t*, gfx_win_t*, int8_t*, int8_t*);
 
-void gfx_init_swap(gfx_t*, gfx_win_t*);
+void gfx_swap_init(gfx_t*, gfx_win_t*);
 
-void gfx_init_dpth(gfx_t*, gfx_win_t*);
+void gfx_dpth_init(gfx_t*, gfx_win_t*);
 
-void gfx_init_pipe(gfx_t*, gfx_win_t*, gfx_vrtx_t*, gfx_dscr_t*, uint64_t);
+void gfx_pipe_init(gfx_t*, gfx_win_t*, gfx_vrtx_t*, gfx_dscr_t*, uint64_t);
 
-void gfx_init_frme(gfx_t*, gfx_win_t*);
+void gfx_frme_init(gfx_t*, gfx_win_t*);
 
-void gfx_rfsh_bfr(gfx_t*, gfx_bfr_t*, void*, uint64_t);
+void gfx_bfr_rfsh(gfx_t*, gfx_bfr_t*, void*, uint64_t);
 
 void gfx_set(gfx_t*, gfx_win_t*);
 
-gfx_vrtx_t* gfx_init_vrtx(gfx_t*, uint32_t, uint64_t);
+gfx_vrtx_t* gfx_vrtx_init(gfx_t*, uint32_t, uint32_t, uint64_t);
 
-void gfx_init_vrtx_bind(gfx_vrtx_t*, uint32_t);
+void gfx_vrtx_bind(gfx_vrtx_t*, uint32_t, uint32_t);
 
-void gfx_set_vrtx_bind(gfx_vrtx_t*, uint32_t, uint32_t);
+void gfx_vrtx_attr(gfx_vrtx_t*, uint32_t, uint32_t, int8_t, uint32_t);
 
-void gfx_init_vrtx_attr(gfx_vrtx_t*, uint32_t);
+void gfx_vrtx_in(gfx_vrtx_t*);
 
-void gfx_set_vrtx_attr(gfx_vrtx_t*, uint32_t, uint32_t, int8_t, uint32_t);
+void gfx_vrtx_rfsh(gfx_t*, gfx_vrtx_t*, uint32_t, void*, uint64_t);
 
-void gfx_set_vrtx_in(gfx_vrtx_t*);
+gfx_bfr_t* gfx_indx_init(gfx_t*, uint64_t);
 
-void gfx_rfsh_vrtx(gfx_t*, gfx_vrtx_t*, uint32_t, void*, uint64_t);
+gfx_bfr_t* gfx_unif_init(gfx_t*, uint64_t);
 
-gfx_bfr_t* gfx_init_indx(gfx_t*, uint64_t);
+gfx_txtr_t* gfx_txtr_init(gfx_t*, gfx_cmd_t*, uint8_t*, uint32_t, uint32_t);
 
-gfx_bfr_t* gfx_init_unif(gfx_t*, uint64_t);
+gfx_dscr_t* gfx_dscr_init(gfx_t*, uint32_t);
 
-gfx_txtr_t* gfx_init_txtr(gfx_t*, gfx_cmd_t*, uint8_t*, uint32_t, uint32_t);
+void gfx_dscr_writ(gfx_t*, gfx_dscr_t*, uint32_t, gfx_bfr_t*, void*, uint64_t, gfx_txtr_t*);
 
-gfx_dscr_t* gfx_init_dscr(gfx_t*, uint32_t);
-
-void gfx_writ_dscr(gfx_t*, gfx_dscr_t*, uint32_t, gfx_bfr_t*, void*, uint64_t, gfx_txtr_t*);
-
-void gfx_set_clr(gfx_win_t*, uint8_t, uint8_t, uint8_t);
+void gfx_clr(gfx_win_t*, uint8_t, uint8_t, uint8_t);
 
 void gfx_draw(gfx_t*, gfx_win_t*, gfx_cmd_t*, gfx_bfr_t*, gfx_vrtx_t*, gfx_dscr_t*, void*, uint64_t, uint32_t, uint32_t, uint32_t);
 
 void gfx_resz(gfx_t*, gfx_win_t*, uint32_t, uint32_t, gfx_vrtx_t*, gfx_dscr_t*, uint64_t);
 
-void gfx_free_bfr(gfx_t*, gfx_bfr_t*);
+void gfx_bfr_free(gfx_t*, gfx_bfr_t*);
 
-void gfx_free_img(gfx_t*, gfx_img_t*);
+void gfx_img_free(gfx_t*, gfx_img_t*);
 
-void gfx_free_vrtx(gfx_t*, gfx_vrtx_t*);
+void gfx_vrtx_free(gfx_t*, gfx_vrtx_t*);
 
-void gfx_free_txtr(gfx_t*, gfx_txtr_t*);
+void gfx_txtr_free(gfx_t*, gfx_txtr_t*);
 
-void gfx_free_dscr(gfx_t*, gfx_dscr_t*);
+void gfx_dscr_free(gfx_t*, gfx_dscr_t*);
 
-void gfx_free_cmd(gfx_t*, gfx_cmd_t*);
+void gfx_cmd_free(gfx_t*, gfx_cmd_t*);
 
-void gfx_free_win(gfx_t*, gfx_win_t*);
+void gfx_win_free(gfx_t*, gfx_win_t*);
 
 void gfx_free(gfx_t*);
 

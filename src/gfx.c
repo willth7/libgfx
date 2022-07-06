@@ -75,16 +75,14 @@ typedef struct gfx_vrtx_s {
 	VkBuffer* bfr;
 	VkDeviceMemory* mem;
 	VkMemoryRequirements* req;
-	uint32_t bfr_n;
 	VkPipelineVertexInputStateCreateInfo in;
 	VkVertexInputBindingDescription* bind;
-	uint32_t bind_n;
+	uint32_t b;
 	VkVertexInputAttributeDescription* attr;
-	uint32_t attr_n;
+	uint32_t a;
 } gfx_vrtx_t;
 
 typedef struct gfx_txtr_s {
-	gfx_bfr_t bfr;
 	gfx_img_t img;
 	VkSampler smpl;
 } gfx_txtr_t;
@@ -160,7 +158,7 @@ gfx_t* gfx_init() {
 	return gfx;
 }
 
-gfx_win_t* gfx_init_win(gfx_t* gfx, GLFWwindow* glfw_win) {
+gfx_win_t* gfx_win_init(gfx_t* gfx, GLFWwindow* glfw_win) {
 	gfx_win_t* win = malloc(sizeof(gfx_win_t));
 	
 	glfwGetWindowSize(glfw_win, &(win->w), &(win->h));
@@ -169,7 +167,7 @@ gfx_win_t* gfx_init_win(gfx_t* gfx, GLFWwindow* glfw_win) {
 	return win;
 }
 
-gfx_cmd_t* gfx_init_cmd(gfx_t* gfx) {
+gfx_cmd_t* gfx_cmd_init(gfx_t* gfx) {
 	gfx_cmd_t* cmd = malloc(sizeof(gfx_cmd_t));
 	
 	VkCommandPoolCreateInfo cmd_poolinfo;
@@ -190,7 +188,7 @@ gfx_cmd_t* gfx_init_cmd(gfx_t* gfx) {
 	return cmd;
 }
 
-void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
+void gfx_rndr_init(gfx_t* gfx, gfx_win_t* win) {
 	VkAttachmentDescription atch[2];
 		atch[0].flags = 0;
 		atch[0].format = VK_FORMAT_B8G8R8A8_SRGB;
@@ -240,7 +238,7 @@ void gfx_init_rndr(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateRenderPass(gfx->devc, &rndrinfo, 0, &(win->rndr));
 }
 
-void gfx_init_shdr(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
+void gfx_shdr_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
 	FILE* f = fopen(pthv, "rb");
 	fseek(f, 0, SEEK_END);
 	uint64_t sz = ftell(f);
@@ -270,7 +268,7 @@ void gfx_init_shdr(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
 	free(src);
 }
 
-void gfx_init_swap(gfx_t* gfx, gfx_win_t* win) {
+void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 	VkSwapchainKHR swap_anc = win->swap;
 	VkSwapchainCreateInfoKHR swapinfo;
 		swapinfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -323,7 +321,7 @@ void gfx_init_swap(gfx_t* gfx, gfx_win_t* win) {
 	}
 }
 
-void gfx_init_dpth(gfx_t* gfx, gfx_win_t* win) {
+void gfx_dpth_init(gfx_t* gfx, gfx_win_t* win) {
 	VkImageCreateInfo imginfo;
 		imginfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		imginfo.pNext = 0;
@@ -367,7 +365,7 @@ void gfx_init_dpth(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateImageView(gfx->devc, &imgvinfo, 0, &(win->dpth.v));
 }
 
-void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t push_sz) {
+void gfx_pipe_init(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dscr, uint64_t push_sz) {
 	VkPipelineShaderStageCreateInfo stginfo[2];
 		stginfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stginfo[0].pNext = 0;
@@ -539,7 +537,7 @@ void gfx_init_pipe(gfx_t* gfx, gfx_win_t* win, gfx_vrtx_t* vrtx, gfx_dscr_t* dsc
 	vkCreateGraphicsPipelines(gfx->devc, 0, 1, &pipeinfo, 0, &(win->pipe));
 }
 
-void gfx_init_frme(gfx_t* gfx, gfx_win_t* win) {
+void gfx_frme_init(gfx_t* gfx, gfx_win_t* win) {
 	VkImageView atch[2];
 	atch[1] = win->dpth.v;
 	VkFramebufferCreateInfo fbfrinfo;
@@ -559,7 +557,7 @@ void gfx_init_frme(gfx_t* gfx, gfx_win_t* win) {
 	}
 }
 
-void gfx_rfsh_bfr(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
+void gfx_bfr_rfsh(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
 	void* memdata;
 	vkMapMemory(gfx->devc, bfr->mem, 0, bfr->req.size, 0, &memdata);
 	memcpy(memdata, data, sz);
@@ -567,13 +565,17 @@ void gfx_rfsh_bfr(gfx_t* gfx, gfx_bfr_t* bfr, void* data, uint64_t sz) {
 	vkBindBufferMemory(gfx->devc, bfr->bfr, bfr->mem, 0);
 }
 
-gfx_vrtx_t* gfx_init_vrtx(gfx_t* gfx, uint32_t bfr_n, uint64_t sz) {
+gfx_vrtx_t* gfx_vrtx_init(gfx_t* gfx, uint32_t b, uint32_t a, uint64_t sz) {
 	gfx_vrtx_t* vrtx = malloc(sizeof(gfx_vrtx_t));
-	vrtx->bfr = malloc(sizeof(VkBuffer) * bfr_n);
-	vrtx->mem = malloc(sizeof(VkDeviceMemory) * bfr_n);
-	vrtx->req = malloc(sizeof(VkMemoryRequirements) * bfr_n);
-	vrtx->bfr_n = bfr_n;
-	for (uint32_t i = 0; i < bfr_n; i++) {
+	vrtx->bfr = malloc(sizeof(VkBuffer) * b);
+	vrtx->mem = malloc(sizeof(VkDeviceMemory) * b);
+	vrtx->req = malloc(sizeof(VkMemoryRequirements) * b);
+	vrtx->bind = malloc(sizeof(VkVertexInputBindingDescription) * b);
+	vrtx->b = b;
+	vrtx->attr = malloc(sizeof(VkVertexInputAttributeDescription) * a);
+	vrtx->a = a;
+	
+	for (uint32_t i = 0; i < b; i++) {
 		VkBufferCreateInfo bfrinfo;
 			bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 			bfrinfo.pNext = 0;
@@ -596,23 +598,13 @@ gfx_vrtx_t* gfx_init_vrtx(gfx_t* gfx, uint32_t bfr_n, uint64_t sz) {
 	return vrtx;
 }
 
-void gfx_init_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t n) {
-	vrtx->bind = malloc(sizeof(VkVertexInputBindingDescription) * n);
-	vrtx->bind_n = n;
-}
-
-void gfx_set_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t b, uint32_t s) {
+void gfx_vrtx_bind(gfx_vrtx_t* vrtx, uint32_t b, uint32_t s) {
 	vrtx->bind[b].binding = b;
 	vrtx->bind[b].stride = s;
 	vrtx->bind[b].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 }
 
-void gfx_init_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t n) {
-	vrtx->attr = malloc(sizeof(VkVertexInputAttributeDescription) * n);
-	vrtx->attr_n = n;
-}
-
-void gfx_set_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, int8_t sz, uint32_t off) {
+void gfx_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, int8_t sz, uint32_t off) {
 	vrtx->attr[l].location = l;
 	vrtx->attr[l].binding = b;
 	if (sz == -4) vrtx->attr[l].format = VK_FORMAT_R32_SINT;
@@ -626,17 +618,17 @@ void gfx_set_vrtx_attr(gfx_vrtx_t* vrtx, uint32_t l, uint32_t b, int8_t sz, uint
 	vrtx->attr[l].offset = off;
 }
 
-void gfx_set_vrtx_in(gfx_vrtx_t* vrtx) {
+void gfx_vrtx_in(gfx_vrtx_t* vrtx) {
 	vrtx->in.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 	vrtx->in.pNext = 0;
 	vrtx->in.flags = 0;
-	vrtx->in.vertexBindingDescriptionCount = vrtx->bind_n;
+	vrtx->in.vertexBindingDescriptionCount = vrtx->b;
 	vrtx->in.pVertexBindingDescriptions = vrtx->bind;
-	vrtx->in.vertexAttributeDescriptionCount = vrtx->attr_n;
+	vrtx->in.vertexAttributeDescriptionCount = vrtx->a;
 	vrtx->in.pVertexAttributeDescriptions = vrtx->attr;
 }
 
-void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint32_t b, void* data, uint64_t sz) {
+void gfx_vrtx_rfsh(gfx_t* gfx, gfx_vrtx_t* vrtx, uint32_t b, void* data, uint64_t sz) {
 	void* memdata;
 	vkMapMemory(gfx->devc, vrtx->mem[b], 0, vrtx->req[b].size, 0, &memdata);
 	memcpy(memdata, data, sz);
@@ -644,7 +636,7 @@ void gfx_rfsh_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx, uint32_t b, void* data, uint64_
 	vkBindBufferMemory(gfx->devc, vrtx->bfr[b], vrtx->mem[b], 0);
 }
 
-gfx_bfr_t* gfx_init_indx(gfx_t* gfx, uint64_t sz) {
+gfx_bfr_t* gfx_indx_init(gfx_t* gfx, uint64_t sz) {
 	gfx_bfr_t* indx = malloc(sizeof(gfx_bfr_t));
 
 	VkBufferCreateInfo bfrinfo;
@@ -669,7 +661,7 @@ gfx_bfr_t* gfx_init_indx(gfx_t* gfx, uint64_t sz) {
 	return indx;
 }
 
-gfx_bfr_t* gfx_init_unif(gfx_t* gfx, uint64_t sz) {
+gfx_bfr_t* gfx_unif_init(gfx_t* gfx, uint64_t sz) {
 	gfx_bfr_t* unif = malloc(sizeof(gfx_bfr_t));
 
 	VkBufferCreateInfo bfrinfo;
@@ -694,8 +686,9 @@ gfx_bfr_t* gfx_init_unif(gfx_t* gfx, uint64_t sz) {
 	return unif;
 }
 
-gfx_txtr_t* gfx_init_txtr(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, uint32_t h) {
+gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, uint32_t h) {
 	gfx_txtr_t* txtr = malloc(sizeof(gfx_txtr_t));
+	gfx_bfr_t bfr;
 
 	VkBufferCreateInfo bfrinfo;
 		bfrinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -706,17 +699,17 @@ gfx_txtr_t* gfx_init_txtr(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		bfrinfo.sharingMode = 0;
 		bfrinfo.queueFamilyIndexCount = 0;
 		bfrinfo.pQueueFamilyIndices = 0;
-	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(txtr->bfr.bfr));
+	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(bfr.bfr));
 	
-	vkGetBufferMemoryRequirements(gfx->devc, txtr->bfr.bfr, &(txtr->bfr.req));
+	vkGetBufferMemoryRequirements(gfx->devc, bfr.bfr, &(bfr.req));
 	VkMemoryAllocateInfo meminfo;
 		meminfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		meminfo.pNext = 0;
-		meminfo.allocationSize = txtr->bfr.req.size;
+		meminfo.allocationSize = bfr.req.size;
 		meminfo.memoryTypeIndex = 0;
-	vkAllocateMemory(gfx->devc, &meminfo, 0, &(txtr->bfr.mem));
+	vkAllocateMemory(gfx->devc, &meminfo, 0, &(bfr.mem));
 	
-	gfx_rfsh_bfr(gfx, &(txtr->bfr), pix, w * h * 4);
+	gfx_bfr_rfsh(gfx, &(bfr), pix, w * h * 4);
 	
 	VkImageCreateInfo imginfo;
 		imginfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -790,7 +783,7 @@ gfx_txtr_t* gfx_init_txtr(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		cp.imageExtent.width = w;
 		cp.imageExtent.height = h;
 		cp.imageExtent.depth = 1;
-	vkCmdCopyBufferToImage(cmd_txtr, txtr->bfr.bfr, txtr->img.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+	vkCmdCopyBufferToImage(cmd_txtr, bfr.bfr, txtr->img.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
 	
 	vkEndCommandBuffer(cmd_txtr);
 	
@@ -850,10 +843,13 @@ gfx_txtr_t* gfx_init_txtr(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		smplinfo.unnormalizedCoordinates = 0;
 	vkCreateSampler(gfx->devc, &smplinfo, 0, &(txtr->smpl));
 	
+	vkDestroyBuffer(gfx->devc, bfr.bfr, 0);
+	vkFreeMemory(gfx->devc, bfr.mem, 0);
+	
 	return txtr;
 }
 
-gfx_dscr_t* gfx_init_dscr(gfx_t* gfx, uint32_t n) {
+gfx_dscr_t* gfx_dscr_init(gfx_t* gfx, uint32_t n) {
 	gfx_dscr_t* dscr = malloc(sizeof(gfx_dscr_t));
 	dscr->set = malloc(sizeof(VkDescriptorSet) * n);
 	dscr->layt = malloc(sizeof(VkDescriptorSetLayout) * n);
@@ -905,7 +901,7 @@ gfx_dscr_t* gfx_init_dscr(gfx_t* gfx, uint32_t n) {
 	return dscr;
 }
 
-void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, void* data, uint64_t sz, gfx_txtr_t* txtr) {
+void gfx_dscr_writ(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, void* data, uint64_t sz, gfx_txtr_t* txtr) {
 	VkWriteDescriptorSet writ[2];
 	uint8_t n = 0;
 	
@@ -914,7 +910,7 @@ void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, vo
 		bfr.buffer = unif->bfr;
 		bfr.offset = 0;
 		bfr.range = sz;
-		gfx_rfsh_bfr(gfx, unif, data, sz);
+		gfx_bfr_rfsh(gfx, unif, data, sz);
 		
 		writ[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writ[n].pNext = 0;
@@ -951,7 +947,7 @@ void gfx_writ_dscr(gfx_t* gfx, gfx_dscr_t* dscr, uint32_t i, gfx_bfr_t* unif, vo
 	vkUpdateDescriptorSets(gfx->devc, n, writ, 0, 0);
 }
 
-void gfx_set_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
+void gfx_clr(gfx_win_t* win, uint8_t r, uint8_t g, uint8_t b) {
 	win->clr[0].color.float32[0] = (float) r / 255;
 	win->clr[0].color.float32[1] = (float) g / 255;
 	win->clr[0].color.float32[2] = (float) b / 255;
@@ -1013,7 +1009,7 @@ void gfx_draw(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd, gfx_bfr_t* indx, gfx_v
 	vkCmdSetViewport(cmd->draw, 0, 1, &vprt);
 	
 	VkDeviceSize offset = {0};
-	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->bfr_n, vrtx->bfr, &offset);
+	vkCmdBindVertexBuffers(cmd->draw, 0, vrtx->b, vrtx->bfr, &offset);
 	vkCmdBindIndexBuffer(cmd->draw, indx->bfr, 0, VK_INDEX_TYPE_UINT32);
 	if (dscr != 0) vkCmdBindDescriptorSets(cmd->draw, VK_PIPELINE_BIND_POINT_GRAPHICS, win->pipe_layt, 0, dscr->n, dscr->set, 0, 0);
 	vkCmdPushConstants(cmd->draw, win->pipe_layt, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_sz, push);
@@ -1079,27 +1075,27 @@ void gfx_resz(gfx_t* gfx, gfx_win_t* win, uint32_t w, uint32_t h, gfx_vrtx_t* vr
 	win->w = w;
 	win->h = h;
 	
-	gfx_init_swap(gfx, win);
-	gfx_init_dpth(gfx, win);
-	gfx_init_pipe(gfx, win, vrtx, dscr, sz);
-	gfx_init_frme(gfx, win);
+	gfx_swap_init(gfx, win);
+	gfx_dpth_init(gfx, win);
+	gfx_pipe_init(gfx, win, vrtx, dscr, sz);
+	gfx_frme_init(gfx, win);
 }
 
-void gfx_free_bfr(gfx_t* gfx, gfx_bfr_t* bfr) {
+void gfx_bfr_free(gfx_t* gfx, gfx_bfr_t* bfr) {
 	vkDestroyBuffer(gfx->devc, bfr->bfr, 0);
 	vkFreeMemory(gfx->devc, bfr->mem, 0);
 	free(bfr);
 }
 
-void gfx_free_img(gfx_t* gfx, gfx_img_t* img) {
+void gfx_img_free(gfx_t* gfx, gfx_img_t* img) {
 	vkDestroyImageView(gfx->devc, img->v, 0);
 	vkDestroyImage(gfx->devc, img->img, 0);
 	vkFreeMemory(gfx->devc, img->mem, 0);
 	free(img);
 }
 
-void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
-	for (uint32_t i = 0; i < vrtx->bfr_n; i++) {
+void gfx_vrtx_free(gfx_t* gfx, gfx_vrtx_t* vrtx) {
+	for (uint32_t i = 0; i < vrtx->b; i++) {
 		vkDestroyBuffer(gfx->devc, vrtx->bfr[i], 0);
 		vkFreeMemory(gfx->devc, vrtx->mem[i], 0);
 	}
@@ -1111,9 +1107,7 @@ void gfx_free_vrtx(gfx_t* gfx, gfx_vrtx_t* vrtx) {
 	free(vrtx);
 }
 
-void gfx_free_txtr(gfx_t* gfx, gfx_txtr_t* txtr) {
-	vkDestroyBuffer(gfx->devc, txtr->bfr.bfr, 0);
-	vkFreeMemory(gfx->devc, txtr->bfr.mem, 0);
+void gfx_txtr_free(gfx_t* gfx, gfx_txtr_t* txtr) {
 	vkDestroyImageView(gfx->devc, txtr->img.v, 0);
 	vkDestroyImage(gfx->devc, txtr->img.img, 0);
 	vkFreeMemory(gfx->devc, txtr->img.mem, 0);
@@ -1122,7 +1116,7 @@ void gfx_free_txtr(gfx_t* gfx, gfx_txtr_t* txtr) {
 	free(txtr);
 }
 
-void gfx_free_dscr(gfx_t* gfx, gfx_dscr_t* dscr) {
+void gfx_dscr_free(gfx_t* gfx, gfx_dscr_t* dscr) {
 	vkFreeDescriptorSets(gfx->devc, dscr->pool, dscr->n, dscr->set);
 	for (uint32_t i = 0; i < dscr->n; i++) {
 		vkDestroyDescriptorSetLayout(gfx->devc, dscr->layt[i], 0);
@@ -1134,13 +1128,13 @@ void gfx_free_dscr(gfx_t* gfx, gfx_dscr_t* dscr) {
 	free(dscr);
 }
 
-void gfx_free_cmd(gfx_t* gfx, gfx_cmd_t* cmd) {
+void gfx_cmd_free(gfx_t* gfx, gfx_cmd_t* cmd) {
 	vkFreeCommandBuffers(gfx->devc, cmd->pool, 1, &(cmd->draw));
 	vkDestroyCommandPool(gfx->devc, cmd->pool, 0);
 	free(cmd);
 }
 
-void gfx_free_win(gfx_t* gfx, gfx_win_t* win) {
+void gfx_win_free(gfx_t* gfx, gfx_win_t* win) {
 	for (uint32_t i = 0; i < win->img_n; i++) {
 		vkDestroyFramebuffer(gfx->devc, win->frme[i], 0);
 	}
