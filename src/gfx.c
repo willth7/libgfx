@@ -12,12 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-//TODO
-//	improve multiple windows
-//	command buffer threading
-//	multiple render passes?
-//	staging buffers?
-
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <stdint.h>
@@ -42,6 +36,7 @@ typedef struct gfx_s {
 	VkInstance inst;
 	VkDevice devc;
 	VkQueue que;
+	uint32_t que_i;
 	VkSemaphore smph_img;
 	VkSemaphore smph_drw;
 	VkFence fnc;
@@ -108,24 +103,23 @@ gfx_t* gfx_init() {
 		instinfo.ppEnabledExtensionNames = glfwGetRequiredInstanceExtensions(&instinfo.enabledExtensionCount);
 	vkCreateInstance(&instinfo, 0, &(gfx->inst));
 
-	int32_t gpuinfo;
-	vkEnumeratePhysicalDevices(gfx->inst, &gpuinfo, 0);
-	VkPhysicalDevice* gpus = malloc(sizeof(VkPhysicalDevice) * gpuinfo);
-	vkEnumeratePhysicalDevices(gfx->inst, &gpuinfo, gpus);
-	VkPhysicalDevice gpu = gpus[0];
-	free(gpus);
+	int32_t gpun;
+	vkEnumeratePhysicalDevices(gfx->inst, &gpun, 0);
+	VkPhysicalDevice* gpu = malloc(sizeof(VkPhysicalDevice) * gpun);
+	vkEnumeratePhysicalDevices(gfx->inst, &gpun, gpu);
 	
 	VkPhysicalDeviceProperties gpuprop;
-	vkGetPhysicalDeviceProperties(gpu, &gpuprop);
+	vkGetPhysicalDeviceProperties(gpu[0], &gpuprop);
 	VkPhysicalDeviceFeatures gpufeat;
-	vkGetPhysicalDeviceFeatures(gpu, &gpufeat);
+	vkGetPhysicalDeviceFeatures(gpu[0], &gpufeat);
 	
+	gfx->que_i = 0;
 	float prio = 0.f;
 	VkDeviceQueueCreateInfo queinfo;
 		queinfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 		queinfo.pNext = 0;
 		queinfo.flags = 0;
-		queinfo.queueFamilyIndex = 0;
+		queinfo.queueFamilyIndex = gfx->que_i;
 		queinfo.queueCount = 1;
 		queinfo.pQueuePriorities = &prio;
 	
@@ -141,8 +135,10 @@ gfx_t* gfx_init() {
 		devcinfo.enabledExtensionCount = 1;
 		devcinfo.ppEnabledExtensionNames = &ext;
 		devcinfo.pEnabledFeatures = &gpufeat;
-	vkCreateDevice(gpu, &devcinfo, 0, &(gfx->devc));
+	vkCreateDevice(gpu[0], &devcinfo, 0, &(gfx->devc));
 	vkGetDeviceQueue(gfx->devc, 0, 0, &(gfx->que));
+	
+	free(gpu);
 	
 	VkSemaphoreCreateInfo smphinfo;
 		smphinfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -176,7 +172,7 @@ gfx_cmd_t* gfx_cmd_init(gfx_t* gfx) {
 		cmd_poolinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		cmd_poolinfo.pNext = 0;
 		cmd_poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		cmd_poolinfo.queueFamilyIndex = 0;
+		cmd_poolinfo.queueFamilyIndex = gfx->que_i;
 	vkCreateCommandPool(gfx->devc, &cmd_poolinfo, 0, &(cmd->pool));
 	
 	VkCommandBufferAllocateInfo cmdinfo;
@@ -193,7 +189,7 @@ gfx_cmd_t* gfx_cmd_init(gfx_t* gfx) {
 void gfx_rndr_init(gfx_t* gfx, gfx_win_t* win) {
 	VkAttachmentDescription atch[2];
 		atch[0].flags = 0;
-		atch[0].format = VK_FORMAT_B8G8R8A8_SRGB;
+		atch[0].format = VK_FORMAT_B8G8R8A8_UNORM;
 		atch[0].samples = VK_SAMPLE_COUNT_1_BIT;
 		atch[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		atch[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -252,15 +248,15 @@ void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 		swapinfo.flags = 0;
 		swapinfo.surface = win->srfc;
 		swapinfo.minImageCount = 3;
-		swapinfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+		swapinfo.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		swapinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		swapinfo.imageExtent.width = win->w;
 		swapinfo.imageExtent.height = win->h;
 		swapinfo.imageArrayLayers = 1;
 		swapinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 		swapinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		swapinfo.queueFamilyIndexCount = 0;
-		swapinfo.pQueueFamilyIndices = 0;
+		swapinfo.queueFamilyIndexCount = 1;
+		swapinfo.pQueueFamilyIndices = &(gfx->que_i);
 		swapinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 		swapinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 		swapinfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
@@ -282,11 +278,11 @@ void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 		imgvinfo.pNext = 0;
 		imgvinfo.flags = 0;
 		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgvinfo.format = VK_FORMAT_B8G8R8A8_SRGB;
-		imgvinfo.components.r = VK_COMPONENT_SWIZZLE_R;
-		imgvinfo.components.g = VK_COMPONENT_SWIZZLE_G;
-		imgvinfo.components.b = VK_COMPONENT_SWIZZLE_B;
-		imgvinfo.components.a = VK_COMPONENT_SWIZZLE_A;
+		imgvinfo.format = VK_FORMAT_B8G8R8A8_UNORM;
+		imgvinfo.components.r = 0;
+		imgvinfo.components.g = 0;
+		imgvinfo.components.b = 0;
+		imgvinfo.components.a = 0;
 		imgvinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imgvinfo.subresourceRange.baseMipLevel = 0;
 		imgvinfo.subresourceRange.levelCount = 1;
@@ -313,8 +309,8 @@ void gfx_dpth_init(gfx_t* gfx, gfx_win_t* win) {
 		imginfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 		imginfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 		imginfo.sharingMode = 0;
-		imginfo.queueFamilyIndexCount = 0;
-		imginfo.pQueueFamilyIndices = 0;
+		imginfo.queueFamilyIndexCount = 1;
+		imginfo.pQueueFamilyIndices = &(gfx->que_i);
 		imginfo.initialLayout = 0;
 	vkCreateImage(gfx->devc, &imginfo, 0, &(win->dpth.img));
 	
@@ -599,8 +595,8 @@ gfx_vrtx_t* gfx_vrtx_init(gfx_t* gfx, uint32_t b, uint32_t a, uint64_t sz) {
 			bfrinfo.size = sz;
 			bfrinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 			bfrinfo.sharingMode = 0;
-			bfrinfo.queueFamilyIndexCount = 0;
-			bfrinfo.pQueueFamilyIndices = 0;
+			bfrinfo.queueFamilyIndexCount = 1;
+			bfrinfo.pQueueFamilyIndices = &(gfx->que_i);
 		vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(vrtx->bfr[i]));
 	
 		vkGetBufferMemoryRequirements(gfx->devc, vrtx->bfr[i], &(vrtx->req[i]));
@@ -662,8 +658,8 @@ gfx_bfr_t* gfx_indx_init(gfx_t* gfx, uint64_t sz) {
 		bfrinfo.size = sz;
 		bfrinfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
+		bfrinfo.queueFamilyIndexCount = 1;
+		bfrinfo.pQueueFamilyIndices = &(gfx->que_i);
 	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(indx->bfr));
 	
 	vkGetBufferMemoryRequirements(gfx->devc, indx->bfr, &(indx->req));
@@ -687,8 +683,8 @@ gfx_bfr_t* gfx_unif_init(gfx_t* gfx, uint64_t sz) {
 		bfrinfo.size = sz;
 		bfrinfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
+		bfrinfo.queueFamilyIndexCount = 1;
+		bfrinfo.pQueueFamilyIndices = &(gfx->que_i);
 	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(unif->bfr));
 	
 	vkGetBufferMemoryRequirements(gfx->devc, unif->bfr, &(unif->req));
@@ -713,8 +709,8 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		bfrinfo.size = w * h * 4;
 		bfrinfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		bfrinfo.sharingMode = 0;
-		bfrinfo.queueFamilyIndexCount = 0;
-		bfrinfo.pQueueFamilyIndices = 0;
+		bfrinfo.queueFamilyIndexCount = 1;
+		bfrinfo.pQueueFamilyIndices = &(gfx->que_i);
 	vkCreateBuffer(gfx->devc, &bfrinfo, 0, &(bfr.bfr));
 	
 	vkGetBufferMemoryRequirements(gfx->devc, bfr.bfr, &(bfr.req));
@@ -732,7 +728,7 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imginfo.pNext = 0;
 		imginfo.flags = 0;
 		imginfo.imageType = VK_IMAGE_TYPE_2D;
-		imginfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+		imginfo.format = VK_FORMAT_R8G8B8A8_UNORM;
 		imginfo.extent.width = w;
 		imginfo.extent.height = h;
 		imginfo.extent.depth = 1;
@@ -742,8 +738,8 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imginfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 		imginfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		imginfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		imginfo.queueFamilyIndexCount = 0;
-		imginfo.pQueueFamilyIndices = 0;
+		imginfo.queueFamilyIndexCount = 1;
+		imginfo.pQueueFamilyIndices = &(gfx->que_i);
 		imginfo.initialLayout = 0;
 	vkCreateImage(gfx->devc, &imginfo, 0, &(txtr->img.img));
 	
@@ -773,10 +769,10 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imgmembar.pNext = 0;
 		imgmembar.srcAccessMask = 0;
 		imgmembar.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		imgmembar.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imgmembar.oldLayout = 0;
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		imgmembar.srcQueueFamilyIndex = 0;
-		imgmembar.dstQueueFamilyIndex = 0;
+		imgmembar.srcQueueFamilyIndex = gfx->que_i;
+		imgmembar.dstQueueFamilyIndex = gfx->que_i;
 		imgmembar.image = txtr->img.img;
 		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imgmembar.subresourceRange.baseMipLevel = 0;
@@ -826,7 +822,7 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imgvinfo.flags = 0;
 		imgvinfo.image = txtr->img.img;
 		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgvinfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+		imgvinfo.format = VK_FORMAT_R8G8B8A8_UNORM;
 		imgvinfo.components.r = 0;
 		imgvinfo.components.g = 0;
 		imgvinfo.components.b = 0;
@@ -842,14 +838,14 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		smplinfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		smplinfo.pNext = 0;
 		smplinfo.flags = 0;
-		smplinfo.magFilter = VK_FILTER_LINEAR;
-		smplinfo.minFilter = VK_FILTER_LINEAR;
+		smplinfo.magFilter = 0;
+		smplinfo.minFilter = 0;
 		smplinfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 		smplinfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		smplinfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		smplinfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		smplinfo.mipLodBias = 0.f;
-		smplinfo.anisotropyEnable = 1;
+		smplinfo.anisotropyEnable = 0;
 		smplinfo.maxAnisotropy = 0;
 		smplinfo.compareEnable = 0;
 		smplinfo.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -989,8 +985,8 @@ void gfx_next(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd) {
 		imgmembar.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 		imgmembar.oldLayout = 0;
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		imgmembar.srcQueueFamilyIndex = 0;
-		imgmembar.dstQueueFamilyIndex = 0;
+		imgmembar.srcQueueFamilyIndex = gfx->que_i;
+		imgmembar.dstQueueFamilyIndex = gfx->que_i;
 		imgmembar.image = win->swap_img[win->img_i];
 		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imgmembar.subresourceRange.baseMipLevel = 0;
@@ -1050,8 +1046,8 @@ void gfx_swap(gfx_t* gfx, gfx_win_t* win, gfx_cmd_t* cmd) {
 		imgmembar.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 		imgmembar.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		imgmembar.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		imgmembar.srcQueueFamilyIndex = 0;
-		imgmembar.dstQueueFamilyIndex = 0;
+		imgmembar.srcQueueFamilyIndex = gfx->que_i;
+		imgmembar.dstQueueFamilyIndex = gfx->que_i;
 		imgmembar.image = win->swap_img[win->img_i];
 		imgmembar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imgmembar.subresourceRange.baseMipLevel = 0;
