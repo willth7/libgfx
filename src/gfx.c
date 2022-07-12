@@ -40,6 +40,8 @@ typedef struct gfx_s {
 	VkSemaphore smph_img;
 	VkSemaphore smph_drw;
 	VkFence fnc;
+	VkFormat img_frmt;
+	VkFormat txtr_frmt;
 
 } gfx_t;
 
@@ -91,7 +93,7 @@ typedef struct gfx_dscr_s {
 	uint32_t n;
 } gfx_dscr_t;
 
-gfx_t* gfx_init() {
+gfx_t* gfx_init(int8_t g) {
 	gfx_t* gfx = malloc(sizeof(gfx_t));
 	VkInstanceCreateInfo instinfo;
 		instinfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -153,6 +155,13 @@ gfx_t* gfx_init() {
 		fncinfo.flags = 0;
 	vkCreateFence(gfx->devc, &fncinfo, 0, &(gfx->fnc));
 	
+	gfx->img_frmt = VK_FORMAT_B8G8R8A8_UNORM;
+	gfx->txtr_frmt = VK_FORMAT_R8G8B8A8_UNORM;
+	if (g) {
+		gfx->img_frmt = VK_FORMAT_B8G8R8A8_SRGB;
+		gfx->txtr_frmt = VK_FORMAT_R8G8B8A8_SRGB;
+	}
+	
 	return gfx;
 }
 
@@ -189,7 +198,7 @@ gfx_cmd_t* gfx_cmd_init(gfx_t* gfx) {
 void gfx_rndr_init(gfx_t* gfx, gfx_win_t* win) {
 	VkAttachmentDescription atch[2];
 		atch[0].flags = 0;
-		atch[0].format = VK_FORMAT_B8G8R8A8_UNORM;
+		atch[0].format = gfx->img_frmt;
 		atch[0].samples = VK_SAMPLE_COUNT_1_BIT;
 		atch[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		atch[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -236,10 +245,6 @@ void gfx_rndr_init(gfx_t* gfx, gfx_win_t* win) {
 	vkCreateRenderPass(gfx->devc, &rndrinfo, 0, &(win->rndr));
 }
 
-void gfx_shdr_init(gfx_t* gfx, gfx_win_t* win, int8_t* pthv, int8_t* pthf) {
-	
-}
-
 void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 	VkSwapchainKHR swap_anc = win->swap;
 	VkSwapchainCreateInfoKHR swapinfo;
@@ -248,7 +253,7 @@ void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 		swapinfo.flags = 0;
 		swapinfo.surface = win->srfc;
 		swapinfo.minImageCount = 3;
-		swapinfo.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		swapinfo.imageFormat = gfx->img_frmt;
 		swapinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		swapinfo.imageExtent.width = win->w;
 		swapinfo.imageExtent.height = win->h;
@@ -278,7 +283,7 @@ void gfx_swap_init(gfx_t* gfx, gfx_win_t* win) {
 		imgvinfo.pNext = 0;
 		imgvinfo.flags = 0;
 		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgvinfo.format = VK_FORMAT_B8G8R8A8_UNORM;
+		imgvinfo.format = gfx->img_frmt;
 		imgvinfo.components.r = 0;
 		imgvinfo.components.g = 0;
 		imgvinfo.components.b = 0;
@@ -728,7 +733,7 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imginfo.pNext = 0;
 		imginfo.flags = 0;
 		imginfo.imageType = VK_IMAGE_TYPE_2D;
-		imginfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+		imginfo.format = gfx->txtr_frmt;
 		imginfo.extent.width = w;
 		imginfo.extent.height = h;
 		imginfo.extent.depth = 1;
@@ -822,7 +827,7 @@ gfx_txtr_t* gfx_txtr_init(gfx_t* gfx, gfx_cmd_t* cmd, uint8_t* pix, uint32_t w, 
 		imgvinfo.flags = 0;
 		imgvinfo.image = txtr->img.img;
 		imgvinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgvinfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+		imgvinfo.format = gfx->txtr_frmt;
 		imgvinfo.components.r = 0;
 		imgvinfo.components.g = 0;
 		imgvinfo.components.b = 0;

@@ -35,7 +35,7 @@ typedef gfx_txtr_t;
 
 typedef gfx_dscr_t;
 
-gfx_t* gfx_init();
+gfx_t* gfx_init(int8_t);
 
 gfx_win_t* gfx_win_init(gfx_t*, void*);
 
